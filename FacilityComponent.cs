@@ -73,10 +73,13 @@ public class FacilityComponent : MonoBehaviour
             bool finished;
             try { finished = f.is_build_finished; }
             catch { finished = true; }
-            if (!finished) continue;
 
             int workers = 0;
             try { workers = f.npc_list?.Count ?? 0; } catch { }
+            int workPos = -1;
+            try { workPos = f.GetWorkPositionCount(); } catch { }
+            Plugin.LogV($"[Facility] 生产所 guid={f.guid} 完工={finished} 工位数={workPos} 工人={workers}");
+            if (!finished) continue;
             if (workers <= 0)
             {
                 Plugin.LogV($"[Facility] 生产所 guid={f.guid} 无工人，今日跳过");

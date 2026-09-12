@@ -32,10 +32,13 @@
 
 ## 机制说明
 
-- 建筑本体是纯数据 Def 注入（`Defs/{stuff,build,tech}.json`，行拷贝自官方采集营地 105006，
+- 建筑本体是纯数据 Def 注入（`Defs/{stuff,build,tech,career}.json`，行拷贝自官方采集营地 105006，
   走游戏官方 Mod Def 通道：`plugins/<mod>/Defs/*.json`）
 - 每日产出由 DLL 驱动：检测游戏日历（`Clock.Now`）换日后，按每座建筑当前工人数 × 产出表
   调用 `Facility.AddStuff` 入袋；无工人的建筑当天跳过
+- **career.json（职业表）是工人系统的总开关**：`Facility.GetOriginalWorkPosCount` 查
+  `D.career_dic_with_facility_id_as_key[stuff_id]`，缺行 = 工位数 0 = 建筑窗口不渲染工人控件、
+  永远分不到工人（0.1.0 实测教训）。本 mod 复用采集者职业（npc_type=8）
 - tech 行的 `txt_id` 是分类段号（100=初始 200=住所 300=食品 3700=制造 1500=物流 600=路桥），
   用错段号建筑不会出现在对应分类的建造菜单里
 
