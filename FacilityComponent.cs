@@ -61,6 +61,14 @@ public class FacilityComponent : MonoBehaviour
     private void ProduceForNewDay()
     {
         var products = Plugin.ParseProducts();
+        int extraId = Plugin.ExtraProduct;
+        if (extraId > 0)
+        {
+            bool exists = false;
+            foreach (var (sid, _) in products)
+                if (sid == extraId) { exists = true; break; }
+            if (!exists) products.Add((extraId, Plugin.ExtraPerDay));
+        }
         if (products.Count == 0) return;
 
         // 深度诊断：career 行真实字段 + 工位状态（配合排查窗口 99/99 问题）

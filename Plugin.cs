@@ -23,6 +23,9 @@ public class Plugin : BasePlugin
     internal static ManualLogSource Logger = null!;
     internal static BepInEx.Configuration.ConfigFile? ModConfigFile;
     internal static BepInEx.Configuration.ConfigEntry<string>? ProductsEntry;
+    internal static BepInEx.Configuration.ConfigEntry<string>? ExtraCandidatesEntry;
+    internal static BepInEx.Configuration.ConfigEntry<int>? ExtraProductEntry;
+    internal static BepInEx.Configuration.ConfigEntry<int>? ExtraPerDayEntry;
     internal static BepInEx.Configuration.ConfigEntry<int>? WorkPosMaxEntry;
     internal static BepInEx.Configuration.ConfigEntry<bool>? VerboseEntry;
     private HarmonyLib.Harmony? _harmony;
@@ -53,6 +56,19 @@ public class Plugin : BasePlugin
                     "建筑窗口里工人 +/- 可调整的上限。默认 10；改小/改大后窗口里即可生效。",
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 25)));
 
+            // 额外产品（窗口下拉框）：候选清单 + 当前选择 + 每日数量
+            ExtraCandidatesEntry = Config.Bind("生产", "额外产品候选", "616001:铁矿,616002:秘银矿,612001:红宝石",
+                new BepInEx.Configuration.ConfigDescription(
+                    "建筑窗口下拉框里的候选产品，格式 物品id:名称，逗号分隔。常用：616001=铁矿，" +
+                    "616002=秘银矿，612001=红宝石，612002=蓝宝石，612003=绿宝石。"));
+            ExtraProductEntry = Config.Bind("生产", "额外产品", 0,
+                new BepInEx.Configuration.ConfigDescription(
+                    "当前选中的额外产品（窗口下拉框写入）。0=无；改成物品 id 立即生效。"));
+            ExtraPerDayEntry = Config.Bind("生产", "额外产品每日数量", 10,
+                new BepInEx.Configuration.ConfigDescription(
+                    "额外产品每人每个游戏日的产出数量。",
+                    new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
+
             LogInfo($"[Facility] 产出配置: {ProductsEntry.Value}, 最大工位数 {WorkPosMaxEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
         }
         catch (Exception ex) { LogError($"[Facility] 配置绑定失败: {ex}"); }
@@ -80,6 +96,51 @@ public class Plugin : BasePlugin
     }
 
     private static string _lastBadRaw = "";
+
+    /// <summary>当前选中的额外产品（0=无）。窗口下拉框写、产量循环读。</summary>
+    internal static int ExtraProduct
+    {
+        get { try { return ExtraProductEntry?.Value ?? 0; } catch { return 0; } }
+    }
+
+    /// <summary>额外产品每人每日数量。</summary>
+    internal static int ExtraPerDay
+    {
+        get { try { return ExtraPerDayEntry?.Value ?? 10; } catch { return 10; } }
+    }
+
+    internal static List<(int id, string name)> ParseExtraCandidates()
+    {
+        var list = new List<(int, string)>();
+        string raw = ExtraCandidatesEntry?.Value ?? "";
+        foreach (var seg in raw.Split(',', ';', '，', '；'))
+        {
+            var s = seg.Trim();
+            if (s.Length == 0) continue;
+            var i = s.IndexOf(':');
+            if (i <= 0 || !int.TryParse(s[..i].Trim(), out int sid) || sid <= 0) continue;
+            list.Add((sid, s[(i + 1)..].Trim()));
+        }
+        return list;
+    }
+
+    /// <summary>下拉框回调：写回 cfg（Config.Save 落盘），下一次换日即生效。</summary>
+    internal static void SetExtraProduct(int stuffId)
+    {
+        try
+        {
+            if (ExtraProductEntry != null)
+            {
+                ExtraProductEntry.Value = stuffId;
+                ModConfigFile?.Save();
+                string name = "";
+                foreach (var (id, nm) in ParseExtraCandidates())
+                    if (id == stuffId) { name = nm; break; }
+                LogInfo($"[Facility] 额外产品 → {(stuffId == 0 ? "无" : $"{name}({stuffId})")}，下一游戏日开始产出");
+            }
+        }
+        catch (Exception ex) { LogError($"[Facility] 写额外产品配置失败: {ex.Message}"); }
+    }
 
     /// <summary>解析「每人每日产出」配置：604001:10,605001:10 → [(604001,10),(605001,10)]。
     /// Config.Reload() 后 Value 已更新，每次换日重解析即可热生效。坏段跳过并告警（同一串只报一次）。</summary>

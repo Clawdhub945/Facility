@@ -29,6 +29,10 @@
     <Reference Include="Assembly-CSharp" HintPath="$(GameDir)\BepInEx\interop\Assembly-CSharp.dll" />
     <Reference Include="Il2Cppmscorlib" HintPath="$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll" />
+    <Reference Include="UnityEngine.UI" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.UI.dll" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.UIModule.dll" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.TextRenderingModule.dll" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(GameDir)\BepInEx\interop\Unity.TextMeshPro.dll" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent"
