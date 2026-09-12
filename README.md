@@ -5,7 +5,7 @@
 ## 功能
 
 - 建造菜单「食品」分类新增 **综合生产所**（免科技，耗材 原木×30，3×3 占地）
-- 建筑使用游戏原生的工人系统：**可安排人工作，人数可调**（采集营地同款外壳与外观，贴图全部用游戏自带资源）
+- 建筑使用游戏原生的工人系统：**可安排人工作，人数可调**（窗口 +/- 可在 1..每座最大工位数 间调整，采集营地同款外壳与外观，贴图全部用游戏自带资源）
 - **每个工人每个游戏日稳定产出**，默认 `10 原木 + 10 石料`，产出自动进建筑袋子，由搬运工入库
 - 产品清单可自由扩展（见下）
 
@@ -16,6 +16,7 @@
 ## 格式：物品id:每人每日数量，多组用英文逗号分隔
 ## 604001=原木，605001=石料
 每人每日产出 = 604001:10,605001:10
+每座最大工位数 = 10
 
 [调试]
 ## 默认 false=安静模式；true 输出每座建筑每项产出的明细日志
@@ -32,8 +33,13 @@
 
 ## 机制说明
 
-- 建筑本体是纯数据 Def 注入（`Defs/{stuff,build,tech,career}.json`，行拷贝自官方采集营地 105006，
+- 建筑本体是纯数据 Def 注入（`Defs/{stuff,build,tech,career,blueprint}.json`，行拷贝自官方采集营地 105006，
   走游戏官方 Mod Def 通道：`plugins/<mod>/Defs/*.json`）
+- **blueprint.json（产品蓝图表）是产品记录/数据键的总开关**：`FacilityHuntingCabin.GetProductDataKeyList(stuff_id)`
+  按设施 id 查蓝图字典，缺行会抛 KeyNotFoundException 并炸断整个窗口绑定
+  （工人数 99/99、库存空、假产量记录），还会让主任务循环 NpcTaskHelper.Tick 反复报错
+- **每座最大工位数**：Harmony 补丁 `Facility.GetOriginalWorkPosCount`（仅 105040），
+  窗口 +/- 的调整上限即此值
 - 每日产出由 DLL 驱动：检测游戏日历（`Clock.Now`）换日后，按每座建筑当前工人数 × 产出表
   调用 `Facility.AddStuff` 入袋；无工人的建筑当天跳过
 - **career.json（职业表）是工人系统的总开关**：`Facility.GetOriginalWorkPosCount` 查

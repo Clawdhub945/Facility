@@ -4,6 +4,7 @@ using System.Text;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
 using Il2CppInterop.Runtime.Injection;
 using UnityEngine;
 
@@ -22,7 +23,9 @@ public class Plugin : BasePlugin
     internal static ManualLogSource Logger = null!;
     internal static BepInEx.Configuration.ConfigFile? ModConfigFile;
     internal static BepInEx.Configuration.ConfigEntry<string>? ProductsEntry;
+    internal static BepInEx.Configuration.ConfigEntry<int>? WorkPosMaxEntry;
     internal static BepInEx.Configuration.ConfigEntry<bool>? VerboseEntry;
+    private HarmonyLib.Harmony? _harmony;
 
     public override void Load()
     {
@@ -43,13 +46,29 @@ public class Plugin : BasePlugin
                 new BepInEx.Configuration.ConfigDescription(
                     "默认 false=安静模式（仅错误与换日汇总）。改为 true 输出每座建筑每项产出的明细日志。"));
 
-            LogInfo($"[Facility] 产出配置: {ProductsEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
+            // 每座最大工位数：Harmony 补丁 Facility.GetOriginalWorkPosCount（仅 105040），
+            // 建筑窗口的工人 +/- 控件即可在 1..该值 范围内原生调整人数
+            WorkPosMaxEntry = Config.Bind("生产", "每座最大工位数", 10,
+                new BepInEx.Configuration.ConfigDescription(
+                    "建筑窗口里工人 +/- 可调整的上限。默认 10；改小/改大后窗口里即可生效。",
+                    new BepInEx.Configuration.AcceptableValueRange<int>(1, 25)));
+
+            LogInfo($"[Facility] 产出配置: {ProductsEntry.Value}, 最大工位数 {WorkPosMaxEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
         }
         catch (Exception ex) { LogError($"[Facility] 配置绑定失败: {ex}"); }
 
         // 失焦时 Unity Update 不跑 → 换日检测/产出全部饿死，与 JianZhu 同款处理
         try { Application.runInBackground = true; }
         catch (Exception ex) { LogError($"[Facility] 设置 runInBackground 失败: {ex.Message}"); }
+
+        // 工位数补丁：GetOriginalWorkPosCount → cfg「每座最大工位数」（仅 105040 生效）
+        try
+        {
+            _harmony = new HarmonyLib.Harmony(PLUGIN_GUID);
+            _harmony.PatchAll();
+            LogInfo("[Facility] 工位数补丁已挂：GetOriginalWorkPosCount（仅 105040）");
+        }
+        catch (Exception ex) { LogError($"[Facility] 挂工位数补丁失败: {ex}"); }
 
         ClassInjector.RegisterTypeInIl2Cpp<FacilityComponent>();
         var go = new GameObject("FacilityModRoot");

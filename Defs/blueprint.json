@@ -1,0 +1,36 @@
+[
+  {
+    "formula_id": 60404000,
+    "disable": 0,
+    "facility_id": 105040,
+    "need_research": 0,
+    "type": 0,
+    "days": 0.0,
+    "product_id": 604001,
+    "output_count": 10,
+    "education_effect": 1,
+    "_material_1": "",
+    "_n1": "",
+    "_material_2": "",
+    "_n2": "",
+    "_material_3": "",
+    "_n3": ""
+  },
+  {
+    "formula_id": 60504000,
+    "disable": 0,
+    "facility_id": 105040,
+    "need_research": 0,
+    "type": 0,
+    "days": 0.0,
+    "product_id": 605001,
+    "output_count": 10,
+    "education_effect": 0,
+    "_material_1": "",
+    "_n1": "",
+    "_material_2": "",
+    "_n2": "",
+    "_material_3": "",
+    "_n3": ""
+  }
+]

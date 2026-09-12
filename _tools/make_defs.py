@@ -69,11 +69,32 @@ def build_rows():
     new_career["facility_id"] = MOD_ID
     new_career["manpower_limit"] = 4
     new_career["is_main_facility"] = 0
-    return new_stuff, new_build, new_tech, new_career
+
+    # ⚠ blueprint 行（产品蓝图表）是产品记录/数据键的总开关：
+    # FacilityHuntingCabin.GetProductDataKeyList(stuff_id) 查蓝图字典[stuff_id]，
+    # 缺行 → KeyNotFoundException，异常沿 WindowWorkFacility.SetInfo 一路炸断——
+    # 窗口全部退化为预制体占位值（工人数 99/99、库存空、假产量记录），
+    # 且 FacilityWork.IsReachLimit 在主任务循环 NpcTaskHelper.Tick 里反复抛（0.2.0 实测）。
+    # 产品直接声明 原木/石料（604001/605001，护林营地/采石场同款先例），
+    # 这样窗口的今年/去年产量记录会真实累加 DLL 的产出。
+    # formula_id 沿用「product_id*100+序号」官方惯例，取 40 槽位（对应 105040）防冲突。
+    src_bp_wood = next(r for r in load("blueprint") if r.get("formula_id") == 60400100)
+    new_bp_wood = dict(src_bp_wood)
+    new_bp_wood["formula_id"] = 60404000
+    new_bp_wood["facility_id"] = MOD_ID
+    new_bp_wood["output_count"] = 10
+
+    src_bp_stone = next(r for r in load("blueprint") if r.get("formula_id") == 60500100)
+    new_bp_stone = dict(src_bp_stone)
+    new_bp_stone["formula_id"] = 60504000
+    new_bp_stone["facility_id"] = MOD_ID
+    new_bp_stone["output_count"] = 10
+
+    return new_stuff, new_build, new_tech, new_career, [new_bp_wood, new_bp_stone]
 
 
 def main():
-    new_stuff, new_build, new_tech, new_career = build_rows()
+    new_stuff, new_build, new_tech, new_career, new_blueprints = build_rows()
 
     out_dir = REPO / "Defs"
     out_dir.mkdir(exist_ok=True)
@@ -85,11 +106,13 @@ def main():
         json.dumps([new_tech], ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     (out_dir / "career.json").write_text(
         json.dumps([new_career], ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-    print(f"generated: {out_dir}\\stuff.json, build.json, tech.json, career.json")
+    (out_dir / "blueprint.json").write_text(
+        json.dumps(new_blueprints, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    print(f"generated: {out_dir}\\stuff.json, build.json, tech.json, career.json, blueprint.json")
 
     if "--deploy" in sys.argv:
         DEF_DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
-        for f in ("stuff.json", "build.json", "tech.json", "career.json"):
+        for f in ("stuff.json", "build.json", "tech.json", "career.json", "blueprint.json"):
             shutil.copy2(out_dir / f, DEF_DEPLOY_DIR / f)
         print(f"deployed: {DEF_DEPLOY_DIR}")
 
