@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Facility</AssemblyName>
+    <Version>1.0.0</Version>
+    <LangVersion>10</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    可覆盖参数（换机器无需改本文件，命令行 -p: 传入即可）：
+      dotnet build -c Release -p:GameDir="D:\Steam\steamapps\common\Territory" -p:ModDir="C:\你的部署目录"
+    GameDir : 游戏本体根目录（需含 BepInEx\core 与 BepInEx\interop）
+    ModDir  : 构建后自动复制 DLL 的目标目录；目录不存在时自动跳过复制
+              ⚠ 本地测试走 C:\TerritoryModTest（游戏启动镜像同步进 plugins，受镜像保护；
+              直接放 BepInEx\plugins 下自建文件夹会被游戏删掉）
+  -->
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Territory</GameDir>
+    <ModDir Condition="'$(ModDir)' == ''">C:\TerritoryModTest</ModDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx.Core" HintPath="$(GameDir)\BepInEx\core\BepInEx.Core.dll" />
+    <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(GameDir)\BepInEx\core\BepInEx.Unity.IL2CPP.dll" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(GameDir)\BepInEx\core\Il2CppInterop.Runtime.dll" />
+    <Reference Include="0Harmony" HintPath="$(GameDir)\BepInEx\core\0Harmony.dll" />
+    <Reference Include="Assembly-CSharp" HintPath="$(GameDir)\BepInEx\interop\Assembly-CSharp.dll" />
+    <Reference Include="Il2Cppmscorlib" HintPath="$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll" />
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent"
+          Condition="'$(ModDir)' != ''">
+    <MakeDir Directories="$(ModDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModDir)" SkipUnchangedFiles="true" />
+    <Message Text="Facility.dll 已复制到 $(ModDir)" Importance="high" />
+  </Target>
+</Project>
