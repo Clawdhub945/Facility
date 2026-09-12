@@ -34,7 +34,7 @@
     "have_worker": 1,
     "must_have_worker": 1,
     "can_modify_worker_count_max": 1,
-    "can_exceed_worker_max_limit": 1,
+    "can_exceed_worker_max_limit": 0,
     "has_finish_sound": 1,
     "env_sound": "forest_sound",
     "has_snow": 1,

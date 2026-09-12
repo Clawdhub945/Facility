@@ -63,6 +63,23 @@ public class FacilityComponent : MonoBehaviour
         var products = Plugin.ParseProducts();
         if (products.Count == 0) return;
 
+        // 深度诊断：career 行真实字段 + 工位状态（配合排查窗口 99/99 问题）
+        try
+        {
+            var dic = D.Ins.career_dic_with_facility_id_as_key;
+            if (dic != null && dic.ContainsKey(Plugin.FacilityId))
+            {
+                var ci = dic[Plugin.FacilityId];
+                Plugin.LogV($"[Facility] career行: data_id={ci.data_id} limit={ci.manpower_limit} " +
+                            $"factor={ci.manpower_factor} npc_type={ci.npc_type} main={ci.is_main_facility}");
+            }
+            else
+            {
+                Plugin.LogV("[Facility] career行: 字典中无 105040！");
+            }
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] career dump 失败: {ex.Message}"); }
+
         var facilities = UnityEngine.Object.FindObjectsOfType<Facility>();
         if (facilities == null) return;
 
@@ -76,9 +93,13 @@ public class FacilityComponent : MonoBehaviour
 
             int workers = 0;
             try { workers = f.npc_list?.Count ?? 0; } catch { }
-            int workPos = -1;
+            int workPos = -1, origPos = -1, customLimit = -1;
+            bool isCustom = false;
             try { workPos = f.GetWorkPositionCount(); } catch { }
-            Plugin.LogV($"[Facility] 生产所 guid={f.guid} 完工={finished} 工位数={workPos} 工人={workers}");
+            try { origPos = f.GetOriginalWorkPosCount(); } catch { }
+            try { isCustom = f.is_custom_worker_count_limit; customLimit = f.worker_count_limit; } catch { }
+            Plugin.LogV($"[Facility] 生产所 guid={f.guid} 完工={finished} 工位数={workPos} 原始工位={origPos} " +
+                        $"自定义上限={isCustom}({customLimit}) 工人={workers}");
             if (!finished) continue;
             if (workers <= 0)
             {

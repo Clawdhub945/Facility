@@ -46,7 +46,6 @@ def build_rows():
     new_build["door_way"] = 1          # 随官方 3×3 矿井的门位掩码（1234 是 3×2 的）
     new_build["res_range"] = 0         # 关掉采集营地的野生菜生成——产出全走 DLL，数值精确
     new_build["res_range_anchor"] = 0
-    new_build["can_exceed_worker_max_limit"] = 1  # 人数上限可突破（矿井同款），配合人数可调
     new_build["guide_info_zh-CN"] = (
         "安排工人后，每个工人每天稳定产出资源\n"
         "# 产出内容与数量在 BepInEx/config/claude.facility.cfg 配置\n"
@@ -63,10 +62,13 @@ def build_rows():
     # 工人控件、永远分不到人（0.1.0 实测窗口只有通用库存/产量模板）。
     # 拷采集营地行：npc_type=8 采集者（与采集营地共用同一职业池，官方多设施共用职业是常态），
     # 图标/帽子贴图沿用游戏自带 career_105006_m/f；manpower_limit 4（3×3 比 3×2 多 1 人）。
+    # ⚠ is_main_facility 必须置 0：每个职业组（同 data_id）只允许一个主设施
+    #   （主=105006 采集营地），重复主设施会把人手 DB 弄乱（0.2.0 实测窗口 99/99 不可交互）。
     src_career = next(r for r in career if r.get("facility_id") == TEMPLATE_ID)
     new_career = dict(src_career)
     new_career["facility_id"] = MOD_ID
     new_career["manpower_limit"] = 4
+    new_career["is_main_facility"] = 0
     return new_stuff, new_build, new_tech, new_career
 
 
