@@ -55,6 +55,50 @@ internal static class FacilityWindowUi
         barRt.pivot = srcRt.pivot;
         barRt.anchoredPosition = srcRt.anchoredPosition + new Vector2(0, -32f);
         barRt.sizeDelta = new Vector2(240f, 28f);
+
+        LogSelectorScreenPos(bar);
+    }
+
+    /// <summary>上一次上报过的选择条屏幕坐标，用于去重（Apply 会被窗口每次刷新调到，不能每次都打日志）。</summary>
+    private static int _lastLoggedX = int.MinValue;
+    private static int _lastLoggedY = int.MinValue;
+
+    /// <summary>
+    /// 详细模式下打印选择条的**屏幕坐标**——供无人值守 UI 自动化直接点击。
+    /// 不要改这个格式：`_tools/e2e.py` 用正则 `选择条屏幕坐标=(\d+),(\d+)` 解析。
+    /// （踩坑：靠截图找深色长条不可靠——游戏地砖本身就有大量深色像素。）
+    /// ⚠ 坐标不变时不重复打日志：Apply 挂在窗口刷新链上，每帧都会跑，
+    ///   不去重的话日志会被这一行刷爆（实测 1 秒上百行）。
+    /// </summary>
+    private static void LogSelectorScreenPos(GameObject bar)
+    {
+        try
+        {
+            var c = CanvasCameras(bar) ?? Camera.main;
+            if (c == null) return;
+            Vector3 sp = RectTransformUtility.WorldToScreenPoint(c, bar.transform.position);
+            // Unity 屏幕坐标系原点在左下；Windows 客户区原点在左上 → y 翻转
+            int wx = Mathf.RoundToInt(sp.x);
+            int wy = Mathf.RoundToInt(Screen.height - sp.y);
+            if (wx == _lastLoggedX && wy == _lastLoggedY) return;
+            _lastLoggedX = wx;
+            _lastLoggedY = wy;
+            Plugin.LogV($"[FacilityUI] 选择条屏幕坐标={wx},{wy} 客户区={Screen.width}x{Screen.height}");
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 选择条坐标上报失败: {ex.Message}"); }
+    }
+
+    /// <summary>取该 UI 所在 Canvas 的相机（Overlay 画布为 null，用 Camera.main 兜底）</summary>
+    private static Camera? CanvasCameras(GameObject bar)
+    {
+        try
+        {
+            var canvas = bar.GetComponentInParent<Canvas>();
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                return canvas.worldCamera;
+        }
+        catch { }
+        return null;
     }
 
     internal static void RewriteTexts(GameObject window)
@@ -89,6 +133,77 @@ internal static class FacilityWindowUi
         if (bar == null) return null;
         RefreshLabel(bar);
         return bar;
+    }
+
+    /// <summary>
+    /// 查找当前存活的选择条（跨全部已打开窗口）。
+    /// 供「自动化测试热键」用它做程序化点击——不依赖 OS 鼠标坐标标定。
+    /// </summary>
+    internal static GameObject? FindLiveSelector()
+    {
+        try
+        {
+            foreach (var t in UnityEngine.Object.FindObjectsOfType<Transform>())
+            {
+                if (t != null && t.name == SelectorName && t.gameObject.activeInHierarchy)
+                    return t.gameObject;
+            }
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] FindLiveSelector 失败: {ex.Message}"); }
+        return null;
+    }
+
+    /// <summary>
+    /// 走 Unity 原生事件系统派发一次点击（自动化测试用）。
+    /// 游戏用手写输入派发，OS 级合成点击的坐标标定很脆（游戏窗口分辨率会变），
+    /// 所以测试钩子直接调 uGUI 的 onClick 链路：`ExecuteEvents.Execute(go, pointerClickHandler)`。
+    /// 返回是否真的派发了事件。
+    /// </summary>
+    internal static bool SimulateClick(GameObject bar)
+    {
+        if (bar == null) return false;
+        var es = UnityEngine.EventSystems.EventSystem.current;
+        if (es == null)
+        {
+            Plugin.LogWarning("[FacilityUI] EventSystem.current 为空，无法派发点击");
+            return false;
+        }
+        var data = new UnityEngine.EventSystems.PointerEventData(es);
+        try
+        {
+            UnityEngine.EventSystems.ExecuteEvents.Execute(
+                bar, data, UnityEngine.EventSystems.ExecuteEvents.pointerClickHandler);
+            Plugin.LogV("[FacilityUI] 已程序化派发 PointerClick 给选择条");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogWarning($"[FacilityUI] 程序化点击失败: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 自动化测试热键处理：找到选择条 → 程序化点击 → 写回 cfg。
+    /// 详细模式关闭时也生效（这是测试钩子，不是调试日志）。
+    /// </summary>
+    internal static void TestClickSelector()
+    {
+        try
+        {
+            var bar = FindLiveSelector();
+            if (bar == null)
+            {
+                Plugin.LogWarning("[FacilityUI] 测试点击：当前没有打开的综合生产所窗口（找不到选择条）");
+                return;
+            }
+            int before = Plugin.ExtraProduct;
+            SimulateClick(bar);
+            int after = Plugin.ExtraProduct;
+            Plugin.LogInfo($"[FacilityUI] 测试点击选择条：额外产品 {before} -> {after}" +
+                           (before == after ? "（未变化，请检查 Button.onClick 是否被触发）" : "（已写入 cfg）"));
+        }
+        catch (Exception ex) { Plugin.LogError($"[FacilityUI] 测试点击异常: {ex}"); }
     }
 
     private static void RefreshLabel(GameObject bar)

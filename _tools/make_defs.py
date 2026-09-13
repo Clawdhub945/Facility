@@ -21,6 +21,16 @@ TEMPLATE_ID = 105006  # 采集营地：原生工人系统（人数可调）+ 自
 TEST_DIR = Path(r"C:\TerritoryModTest")
 DEF_DEPLOY_DIR = TEST_DIR / "Defs"
 
+# 默认产出（每人每日）：必须与 Plugin.cs 里 cfg「每人每日产出」默认值一致
+DEFAULT_PRODUCTS = [(604001, 10, "原木"), (605001, 10, "石料")]
+# 窗口「额外产品候选」：必须与 Plugin.cs 的 cfg 默认值一致。
+# 这些产品也要有 blueprint 行，否则窗口产量记录区不会给它们开条目。
+DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, "红宝石")]
+# formula_id 槽位基数：官方惯例 formula_id = product_id*100 + 序号，
+# 序号在该设施内唯一即可（实测 105006 用 00/01/02/03/04 对应 5 个产品）。
+# 105040 用 40 起的槽位，跟官方现有 206 行完全不冲突，也便于一眼认出是本 mod 的行。
+FORMULA_SLOT_BASE = 40
+
 
 def load(table: str):
     return json.loads((EXTRA_DATA / f"{table}.json").read_text(encoding="utf-8"))
@@ -75,22 +85,51 @@ def build_rows():
     # 缺行 → KeyNotFoundException，异常沿 WindowWorkFacility.SetInfo 一路炸断——
     # 窗口全部退化为预制体占位值（工人数 99/99、库存空、假产量记录），
     # 且 FacilityWork.IsReachLimit 在主任务循环 NpcTaskHelper.Tick 里反复抛（0.2.0 实测）。
-    # 产品直接声明 原木/石料（604001/605001，护林营地/采石场同款先例），
-    # 这样窗口的今年/去年产量记录会真实累加 DLL 的产出。
-    # formula_id 沿用「product_id*100+序号」官方惯例，取 40 槽位（对应 105040）防冲突。
-    src_bp_wood = next(r for r in load("blueprint") if r.get("formula_id") == 60400100)
-    new_bp_wood = dict(src_bp_wood)
-    new_bp_wood["formula_id"] = 60404000
-    new_bp_wood["facility_id"] = MOD_ID
-    new_bp_wood["output_count"] = 10
+    # 产品的**来源行**（决定 type/days/教育加成等字段）优先复用官方同产品行，
+    # 官方没有该产品行时（如铁矿 616001 只在 105013 有）退回石料行当模板。
+    bp_table = load("blueprint")
+    stuff_table = load("stuff")
+    stuff_type_by_id = {r.get("stuff_id"): r.get("stuff_type") for r in stuff_table}
 
-    src_bp_stone = next(r for r in load("blueprint") if r.get("formula_id") == 60500100)
-    new_bp_stone = dict(src_bp_stone)
-    new_bp_stone["formula_id"] = 60504000
-    new_bp_stone["facility_id"] = MOD_ID
-    new_bp_stone["output_count"] = 10
+    def blueprint_template(product_id: int) -> dict:
+        for r in bp_table:
+            if r.get("product_id") == product_id:
+                return r
+        for r in bp_table:
+            if r.get("product_id") == 605001:   # 石料行：普通日产物，最中性
+                return r
+        raise RuntimeError("blueprint 表里找不到可用模板行")
 
-    return new_stuff, new_build, new_tech, new_career, [new_bp_wood, new_bp_stone]
+    def make_blueprint(product_id: int, slot: int, output_count: int) -> dict:
+        if product_id not in stuff_type_by_id:
+            raise RuntimeError(f"物品 {product_id} 不在官方 stuff.json 里，先确认 id 再生成 Def")
+        row = dict(blueprint_template(product_id))
+        row["formula_id"] = product_id * 100 + slot
+        row["facility_id"] = MOD_ID
+        row["product_id"] = product_id
+        row["output_count"] = output_count
+        row["disable"] = 0
+        row["need_research"] = 0
+        return row
+
+    # 产品清单 = 默认产出 + 额外产品候选，去重后依次分配 formula 槽位。
+    # 额外产品（铁矿/秘银/红宝石等）也要有行：窗口「今年/去年产量」记录区按蓝图键开条目，
+    # 缺行则 DLL 记进去的产量在窗口里看不到（0.4.0 修的正是这个）。
+    ordered: list[tuple[int, int]] = []
+    seen: set[int] = set()
+    for pid, per, _name in DEFAULT_PRODUCTS:
+        if pid not in seen:
+            seen.add(pid)
+            ordered.append((pid, per))
+    for pid, _name in DEFAULT_EXTRA_CANDIDATES:
+        if pid not in seen:
+            seen.add(pid)
+            ordered.append((pid, 10))   # 额外产品每日数量默认 10（cfg「额外产品每日数量」）
+
+    blueprints = [make_blueprint(pid, FORMULA_SLOT_BASE + i, per)
+                  for i, (pid, per) in enumerate(ordered)]
+
+    return new_stuff, new_build, new_tech, new_career, blueprints
 
 
 def main():

@@ -8,5 +8,11 @@ obj/
 # ===== 扫描 / 调试临时产物（运行时生成，不入库）=====
 *_tmp.json
 
+# ===== 自动化测试截图（_tools/autotest.py 运行时生成）=====
+_tools/_shots/
+_tools/__pycache__/
+__pycache__/
+*.pyc
+
 # ===== 系统 / 驱动产生的垃圾目录 =====
 NVIDIA Corporation/
