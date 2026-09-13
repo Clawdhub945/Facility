@@ -47,6 +47,8 @@ public class Plugin : BasePlugin
     internal static BepInEx.Configuration.ConfigEntry<int>? ExtraPerDayEntry;
     internal static BepInEx.Configuration.ConfigEntry<int>? WorkPosMaxEntry;
     internal static BepInEx.Configuration.ConfigEntry<bool>? VerboseEntry;
+    /// <summary>超级生产所自定义贴图的整体缩放（cfg「外观.超级生产所贴图缩放」）</summary>
+    internal static BepInEx.Configuration.ConfigEntry<float>? SpriteScaleEntry;
     private HarmonyLib.Harmony? _harmony;
 
     public override void Load()
@@ -87,6 +89,13 @@ public class Plugin : BasePlugin
                 new BepInEx.Configuration.ConfigDescription(
                     "额外产品每人每个游戏日的产出数量。",
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
+
+            // 自定义外观缩放：改完**最多 1.5 秒热生效**（不用重启游戏）
+            SpriteScaleEntry = Config.Bind("外观", "超级生产所贴图缩放", 1.3f,
+                new BepInEx.Configuration.ConfigDescription(
+                    "超级生产所自定义贴图的整体缩放。1.0 = 按 64 像素/格 1:1 渲染。" +
+                    "觉得模型比占地格小就调大、大了就调小；改完最多 1.5 秒生效，无需重启。",
+                    new BepInEx.Configuration.AcceptableValueRange<float>(0.3f, 3f)));
 
             LogV($"[Facility] 产出配置: {ProductsEntry.Value}, 最大工位数 {WorkPosMaxEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
         }

@@ -376,6 +376,17 @@ internal static class CustomSprite
                 if (sr.sprite != sprite) sr.sprite = sprite;
                 if (!sr.enabled) sr.enabled = true;
                 if (!sr.gameObject.activeSelf) sr.gameObject.SetActive(true);
+
+                // 尺寸微调：贴图渲染出来比占地格小/大时，用缩放纠正。
+                // ⚠ 做成 cfg 可调（「外观.超级生产所贴图缩放」）是刻意的：
+                //   游戏内部的建筑渲染缩放很难从外部精确标定（试过用放置格箭头、
+                //   用已知建筑当标尺，都被场景杂色干扰），交给玩家在游戏里一眼调最靠谱，
+                //   而且改完 1.5 秒热生效，不用重编译也不用重启。
+                float scale = 1f;
+                try { scale = Plugin.SpriteScaleEntry?.Value ?? 1f; } catch { }
+                if (scale <= 0f) scale = 1f;
+                var want = new Vector3(scale, scale, 1f);
+                if (sr.transform.localScale != want) sr.transform.localScale = want;
                 ours = 1;
             }
         }
