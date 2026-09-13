@@ -34,22 +34,20 @@ public class FacilityComponent : MonoBehaviour
     /// </summary>
     private void PollCustomSprite()
     {
-        if (_customSpriteReady) return;
         try
         {
-            // 图标注册 + 给已存在的建筑补外观。
-            // ⚠ 为什么要在 Update 里反复试：`SpriteManager` 实例在插件 Load() 阶段还没建好
-            // （静态字段 Ins 是 null、场景里也找不到），所以只能等世界起来再注册。
-            // 菜单白块的原因就是「菜单先打开、注册后完成」—— 重启游戏后第一次打开菜单即正常。
-            bool iconOk = CustomSprite.RegisterIcon();
-            CustomSprite.ReapplyToAll();
-            if (iconOk && CustomSprite.IconSprite != null)
+            // 图标注册：只需要成功一次
+            if (!_customSpriteReady)
             {
-                _customSpriteReady = true;
-                Plugin.LogV("[Facility] 自定义外观初始化完成（贴图 + 菜单图标）");
+                if (CustomSprite.RegisterIcon() && CustomSprite.IconSprite != null)
+                    _customSpriteReady = true;
             }
+            // 补外观：**不能只在初始化时做一次** —— 读档/新造的建筑都要补，
+            // 所以每帧都扫一遍（FindObjectsOfType 很便宜，建筑数量也就几座）。
+            // 早期版本把它放在 _customSpriteReady 判断里，导致读档后已存在的建筑漏掉换图。
+            CustomSprite.ReapplyToAll();
         }
-        catch (Exception ex) { Plugin.LogV($"[Facility] 自定义外观初始化异常: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 自定义外观轮询异常: {ex.Message}"); }
     }
 
     /// <summary>

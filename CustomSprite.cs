@@ -122,6 +122,9 @@ internal static class CustomSprite
             var rect = new Rect(0f, 0f, tex.width, tex.height);
             var sprite = Sprite.Create(tex, rect, pivot, pixelsPerUnit, 0,
                                        SpriteMeshType.FullRect, Vector4.zero);
+            // ⚠ 必须**显式命名**：Sprite.Create 造出来的图默认没有名字，
+            // 诊断日志里会显示成空字符串，排查时分不清「图没加载」还是「图加载了但没名字」。
+            try { sprite.name = Path.GetFileNameWithoutExtension(fileName); } catch { }
             sprite.hideFlags = HideFlags.HideAndDontSave;
             Plugin.LogV($"[Facility] 贴图已加载 {Path.GetFileName(path)} {tex.width}×{tex.height} ppu={pixelsPerUnit}");
             return sprite;
@@ -257,63 +260,122 @@ internal static class CustomSprite
     // ------------------------------------------------------------------
 
     /// <summary>
+    /// 我们自己的渲染器挂在建筑根节点下的这个名字上（单独一个 SpriteRenderer）。
+    /// 这样即使建筑自带的渲染器还残留，也只会出现「两套图重叠」而不是「我们的图被覆盖」；
+    /// 同时下面会把自带那套关掉。
+    /// </summary>
+    private const string OwnRendererName = "facility_custom_body";
+
+    /// <summary>
+    /// 已经把外观换好的建筑 guid → 用的朝向。
+    /// ⚠ 为什么要记住：游戏刷新建筑时会**把 `body/sp` 重新 SetActive(true)**，
+    /// 于是「原来的制造台」又画出来了（用户实测：贴图是 3×2 但背后还叠着 1×3 的制造台）。
+    /// 所以 `ApplyAppearance` 会被反复调用（每帧），这里用来记录状态、并在每次调用里强制对齐。
+    /// </summary>
+    private static readonly Dictionary<int, int> _applied = new();
+
+    /// <summary>
     /// 把某栋建筑的模型换成我们的贴图（rotation 决定用哪张）。
-    /// 两套渲染都要改：MySpriteRenderer 认 sprite_id，原生 SpriteRenderer 认 sprite。
+    ///
+    /// ⚠⚠ 极其重要的副作用：`sprite_id` 指向的是**共享的图集**。
+    /// 综合生产所(105040) 和超级生产所(105050) **用的是同一个 `workbench` prefab**，
+    /// 所以一旦改 `sprite_id`，4 座综合生产所**也会跟着变成我们的图**
+    /// （用户实测反馈「4 座综合不见了，只剩超级生产所」就是这个原因）。
+    ///
+    /// 因此做法必须是：
+    ///   1. 只对 105050 生效（调用方已判）
+    ///   2. **不碰共享的 `sprite_id`**，只操作这栋建筑自己的原生渲染器
+    ///   3. 挂一个自有渲染器画我们的图 + 把自带渲染器整个关掉，并且**每帧重做**
+    ///      （游戏刷新会把自带渲染器重新激活）
     /// </summary>
     internal static void ApplyAppearance(Facility facility, int rotation)
     {
         if (facility == null) return;
         var sprite = BodySprite(rotation);
-        if (sprite == null)
-        {
-            Plugin.LogV("[Facility] 自定义外观贴图没加载出来，保持原样");
-            return;
-        }
+        if (sprite == null) return;
 
-        int native = 0, custom = 0;
+        int guid = 0;
+        try { guid = facility.guid; } catch { }
+
+        int disabled = 0, ours = 0;
+        bool firstTime = !_applied.ContainsKey(guid);
+
+        // ① 关掉自带渲染器（物体也关，游戏刷新会重新激活 → 所以每帧都要做）
         try
         {
-            // ① 游戏自绘批渲染（MySpriteRenderer）：只认 sprite_id
-            var spBody = facility.sp_body;
-            if (spBody != null)
-            {
-                try
-                {
-                    var sm = Manager;
-                    if (sm != null)
-                    {
-                        string spriteName = SpriteNamePrefix + "_" + rotation;
-                        spBody.sprite_id = sm.TryGetSpriteId(spriteName);
-                        custom++;
-                        Plugin.LogV($"[Facility] sprite_id ← {spriteName}");
-                    }
-                    else Plugin.LogV("[Facility] 拿不到 SpriteManager 实例，跳过 sprite_id");
-                }
-                catch (Exception ex) { Plugin.LogV($"[Facility] 设置 sprite_id 失败: {ex.Message}"); }
-
-                // 必须强制刷新：MySpriteRenderer 不会自己发现 sprite_id 变了
-                try
-                {
-                    spBody.gameObject.SetActive(false);
-                    spBody.gameObject.SetActive(true);
-                }
-                catch (Exception ex) { Plugin.LogV($"[Facility] 刷新渲染失败（可忽略）: {ex.Message}"); }
-            }
-
-            // ② 原生 SpriteRenderer 兜底（有些 prefab 用原生渲染）
             foreach (var sr in facility.gameObject.GetComponentsInChildren<SpriteRenderer>(true))
             {
-                if (sr == null) continue;
-                sr.sprite = sprite;
-                sr.enabled = true;
-                native++;
+                if (sr == null || sr.gameObject.name == OwnRendererName) continue;
+                if (sr.enabled) sr.enabled = false;
+                disabled++;
+                try
+                {
+                    if (sr.gameObject != facility.gameObject && sr.gameObject.activeSelf)
+                        sr.gameObject.SetActive(false);
+                }
+                catch { }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) { Plugin.LogV($"[Facility] 关闭自带渲染器失败: {ex.Message}"); }
+
+        // ② 挂/更新我们自己的渲染器（画自定义贴图）
+        try
         {
-            Plugin.LogError($"[Facility] 换外观失败: {ex}");
+            var t = facility.transform.Find(OwnRendererName);
+            SpriteRenderer sr;
+            if (t == null)
+            {
+                var go = new GameObject(OwnRendererName);
+                go.transform.SetParent(facility.transform, false);
+                sr = go.AddComponent<SpriteRenderer>();
+                var refSr = facility.gameObject.GetComponentInChildren<SpriteRenderer>(true);
+                if (refSr != null)
+                {
+                    try { sr.sharedMaterial = refSr.sharedMaterial; } catch { }
+                    try { sr.sortingLayerID = refSr.sortingLayerID; } catch { }
+                    try { sr.sortingOrder = refSr.sortingOrder; } catch { }
+                }
+            }
+            else sr = t.GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                if (sr.sprite != sprite) sr.sprite = sprite;
+                if (!sr.enabled) sr.enabled = true;
+                if (!sr.gameObject.activeSelf) sr.gameObject.SetActive(true);
+                ours = 1;
+            }
         }
-        Plugin.LogV($"[Facility] 超级生产所外观已替换（朝向 {rotation}：自定义渲染 {custom} 个 / 原生渲染 {native} 个）");
+        catch (Exception ex) { Plugin.LogError($"[Facility] 挂自定义渲染器失败: {ex}"); }
+
+        // ⚠ **不动 `sp_body.sprite_id`**：它指向共享图集，改了会连带把 105040 一起换掉。
+        // （早期版本改过它，结果用户看到「综合生产所不见了、只剩超级生产所」。）
+
+        if (firstTime)
+        {
+            _applied[guid] = rotation;
+            Plugin.LogV($"[Facility] 超级生产所 guid={guid} 外观已替换" +
+                        $"（朝向 {rotation}：关自带渲染器 {disabled} 个 / 自建渲染器 {ours} 个；" +
+                        $"未改共享 sprite_id，避免影响综合生产所）");
+        }
+    }
+
+    /// <summary>建筑被拆除/换档时清掉记录</summary>
+    internal static void Forget(int guid)
+    {
+        try { _applied.Remove(guid); } catch { }
+    }
+
+    /// <summary>取相对路径（诊断用），例如 "body/sp"</summary>
+    private static string PathOf(Transform t, Transform root)
+    {
+        var parts = new List<string>();
+        var cur = t;
+        while (cur != null && cur != root)
+        {
+            parts.Insert(0, cur.name);
+            cur = cur.parent;
+        }
+        return string.Join("/", parts);
     }
 
     /// <summary>给「所有已存在的」超级生产所补一次外观（读档/热重载后用）</summary>
