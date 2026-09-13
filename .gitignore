@@ -17,3 +17,4 @@ __pycache__/
 # ===== 系统 / 驱动产生的垃圾目录 =====
 NVIDIA Corporation/
 _commitmsg.txt
+_save_backup_*/
