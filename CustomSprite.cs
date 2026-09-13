@@ -300,7 +300,47 @@ internal static class CustomSprite
         int disabled = 0, ours = 0;
         bool firstTime = !_applied.ContainsKey(guid);
 
-        // ① 关掉自带渲染器（物体也关，游戏刷新会重新激活 → 所以每帧都要做）
+        // ① 换掉**游戏批渲染**的图 —— 这是关键一步，MD「坑 3」写得很清楚：
+        //    游戏用 `MySpriteRenderer` 批渲染，它会**禁用原生 SpriteRenderer**、
+        //    只读 `sprite_id`，完全不看 `sr.sprite`。
+        //    早期版本只改了原生渲染器 + 关掉 body/sp，结果批渲染那层照旧画采集营地
+        //    → 用户看到「两层贴图，上面一层是采集营地，下面才是自定义图」。
+        //    `sprite_id` 必须换，并且**必须 SetActive(false/true) 强制刷新**（它不监听变化）。
+        //
+        // 注：之前担心改 sprite_id 会连带改到综合生产所 —— 那是当时两者共用 `workbench` prefab
+        //     导致的（sprite_id 指向共享图集）。现在超级生产所用 `gatherers_hut`、
+        //     综合生产所用 `workbench`，两者不同 prefab，不会再互相影响。
+        int batch = 0;
+        try
+        {
+            var spBody = facility.sp_body;
+            if (spBody != null)
+            {
+                var sm = Manager;
+                if (sm != null)
+                {
+                    string spriteName = $"{SpriteNamePrefix}_{rotation}";
+                    spBody.sprite_id = sm.TryGetSpriteId(spriteName);
+                    batch = 1;
+                    // 强制刷新：批渲染不会自己发现 sprite_id 变了
+                    try
+                    {
+                        spBody.gameObject.SetActive(false);
+                        spBody.gameObject.SetActive(true);
+                    }
+                    catch (Exception ex) { Plugin.LogV($"[Facility] 批渲染刷新失败: {ex.Message}"); }
+                }
+                else Plugin.LogV("[Facility] 拿不到 SpriteManager 实例，跳过 sprite_id（批渲染会保留原图）");
+            }
+            else Plugin.LogV("[Facility] facility.sp_body 为空，跳过 sprite_id（批渲染会保留原图）");
+        }
+        catch (Exception ex) { Plugin.LogError($"[Facility] 设置批渲染 sprite_id 失败: {ex}"); }
+
+        // ② 关掉自带渲染器。
+        // ⚠ 只关 `sr.enabled`，**不要 SetActive(false) 关物体** ——
+        //   批渲染（MySpriteRenderer）就挂在 `body/sp` 这个物体上，
+        //   把物体关掉会把批渲染一起关掉（MD 的方式1 也是只调 SetActive 做刷新、不关物体）。
+        //   游戏刷新建筑时会重新 enable 它，所以每帧都要做。
         try
         {
             foreach (var sr in facility.gameObject.GetComponentsInChildren<SpriteRenderer>(true))
@@ -308,17 +348,11 @@ internal static class CustomSprite
                 if (sr == null || sr.gameObject.name == OwnRendererName) continue;
                 if (sr.enabled) sr.enabled = false;
                 disabled++;
-                try
-                {
-                    if (sr.gameObject != facility.gameObject && sr.gameObject.activeSelf)
-                        sr.gameObject.SetActive(false);
-                }
-                catch { }
             }
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 关闭自带渲染器失败: {ex.Message}"); }
 
-        // ② 挂/更新我们自己的渲染器（画自定义贴图）
+        // ③ 挂/更新我们自己的原生渲染器（MD 的「方式2/方式3」备份方案）
         try
         {
             var t = facility.transform.Find(OwnRendererName);
@@ -347,15 +381,11 @@ internal static class CustomSprite
         }
         catch (Exception ex) { Plugin.LogError($"[Facility] 挂自定义渲染器失败: {ex}"); }
 
-        // ⚠ **不动 `sp_body.sprite_id`**：它指向共享图集，改了会连带把 105040 一起换掉。
-        // （早期版本改过它，结果用户看到「综合生产所不见了、只剩超级生产所」。）
-
         if (firstTime)
         {
             _applied[guid] = rotation;
             Plugin.LogV($"[Facility] 超级生产所 guid={guid} 外观已替换" +
-                        $"（朝向 {rotation}：关自带渲染器 {disabled} 个 / 自建渲染器 {ours} 个；" +
-                        $"未改共享 sprite_id，避免影响综合生产所）");
+                        $"（朝向 {rotation}：批渲染 sprite_id {batch} 个 / 关自带渲染器 {disabled} 个 / 自建渲染器 {ours} 个）");
         }
     }
 
