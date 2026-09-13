@@ -157,12 +157,24 @@ def production_lines(watcher, seconds=40):
 
 
 def main():
+    try:
+        return _run()
+    finally:
+        pass
+
+
+def _run():
     no_load = "--no-load" in sys.argv
     print("=== Facility 全自动端到端测试 ===")
     SHOTS.mkdir(parents=True, exist_ok=True)
     watcher = A.LogWatcher(A.BEPINEX_LOG, from_end=True)
 
     # --- 1/2. 进程 / API（没在跑 / 卡死就自动拉起来）---
+    # 关系统代理：否则 Steam UGC 证书校验失败 → 工坊贴图进不了 atlas → MainScene.Start 崩 → 卡「加载中」
+    proxy_state = A.proxy_off_for_launch()
+    if proxy_state[0]:
+        print(f"  已临时关闭系统代理（原为 {proxy_state[1]}）——开着进游戏会卡在「加载中」")
+
     def restart_game(why):
         print(f"  {why} → 自动重启游戏…")
         A.kill_game()
@@ -202,9 +214,13 @@ def main():
         ok, st2, dt = A.load_save(save)
         check("进入最新存档", ok, f"{save} 用时 {dt:.1f}s state={st2}")
         if not ok:
+            A.restore_system_proxy(proxy_state)
+            print("  提示：卡「加载中」多半是系统代理没关干净（见 docs/开发交接.md §11）")
             return 1
         time.sleep(8)
         scan()          # 读档后必须重扫，否则拿到的是上个世界的 ptrHash
+
+    A.restore_system_proxy(proxy_state)   # 世界已经进去了，代理可以还原（工坊内容已挂载）
 
     st = A.api_state() or {}
     check("在存档内 (inSave)", st.get("inSave") is True, json.dumps(st, ensure_ascii=False))
@@ -216,37 +232,53 @@ def main():
     if not facs:
         return 1
 
-    # --- 4/5. 打开窗口 + 点选择条 ---
+    # --- 4/5. 打开窗口 → 点下拉框标题条展开 → 点某个选项 ---
     print("\n-- 打开建筑窗口（自动定位+点击）--")
     img, pos = open_facility_window(hwnd, watcher)
-    check("建筑窗口打开且拿到「额外产品」选择条坐标", pos is not None,
-          f"选择条客户区坐标={pos}")
+    check("建筑窗口打开且拿到「额外产品」下拉框坐标", pos is not None,
+          f"下拉框标题条客户区坐标={pos}")
     if img is not None:
         img.save(SHOTS / "e2e_window_found.png")
 
     if pos:
+        # ① 点标题条 → 应展开候选列表（此时 cfg 不该变，变的是 UI 状态）
         cfg_before = A.read_cfg().get("额外产品")
+        watcher.poll()
         A.focus_window(hwnd)
-        time.sleep(0.5)
-        cw, ch = A.client_size(hwnd)              # 点击前重新读几何，别用旧值
-        sx, sy = A.client_to_screen(hwnd, pos[0], pos[1])
-        print(f"  点击选择条: 客户区={cw}x{ch} 坐标=({pos[0]},{pos[1]}) → 屏幕=({sx},{sy})")
-        A.move_cursor(sx, sy)
-        time.sleep(0.3)
-        A.mouse_button("left", True)
-        time.sleep(0.09)
-        A.mouse_button("left", False)
-        time.sleep(1.4)
-        cfg_after = A.read_cfg().get("额外产品")
-        check("点击选择条 → cfg「额外产品」被改写", cfg_before != cfg_after,
-              f"{cfg_before} -> {cfg_after}")
-        A.client_grab(hwnd, SHOTS / "e2e_after_selector_click.png")
-    else:
-        check("点击选择条 → cfg「额外产品」被改写", False, "未找到选择条，跳过")
+        time.sleep(0.4)
+        A.click_client(hwnd, pos[0], pos[1], settle=1.2)
+        hdr_lines = watcher.poll([r"下拉框(展开|收起)"])
+        expanded = any("展开" in l for l in hdr_lines)
+        img_open = A.client_grab(hwnd, SHOTS / "e2e_dropdown_open.png")
+        check("点标题条 → 下拉框展开", expanded,
+              hdr_lines[-1].split("] ", 1)[-1] if hdr_lines else "没有下拉框日志")
+        cfg_mid = A.read_cfg().get("额外产品")
+        check("展开动作不改配置（只弹列表）", cfg_mid == cfg_before, f"{cfg_before} -> {cfg_mid}")
 
-    # --- 5b. 测试钩子：F8 程序化点击（走 Unity 事件系统，不依赖坐标标定）---
-    if not no_load or pos is None:
-        pass
+        # ② 列表里点「下一项」→ cfg 应被改写并收起
+        if expanded:
+            cands = A.parse_candidates(A.read_cfg().get("额外产品候选"))
+            ids = [0] + [c[0] for c in cands]
+            try:
+                i = ids.index(int(cfg_mid))
+            except (ValueError, TypeError):
+                i = 0
+            next_id = ids[(i + 1) % len(ids)]
+            # 选项行：列表在标题条下方，行高 24，第 n 行中心 = 标题条 y + 28 + 1 + 2 + 24*n + 12
+            row_y = pos[1] + 28 + 1 + 2 + 24 * (i + 1) + 12
+            print(f"  点选项 Row_{next_id}（客户区 {pos[0]},{row_y}）")
+            A.click_client(hwnd, pos[0], row_y, settle=1.3)
+            cfg_after = A.read_cfg().get("额外产品")
+            check("点下拉框选项 → cfg「额外产品」被改写", str(cfg_after) != str(cfg_mid),
+                  f"{cfg_mid} -> {cfg_after}")
+            A.client_grab(hwnd, SHOTS / "e2e_after_option_click.png")
+        else:
+            check("点下拉框选项 → cfg「额外产品」被改写", False, "列表没展开，跳过")
+    else:
+        check("点标题条 → 下拉框展开", False, "未找到下拉框，跳过")
+        check("点下拉框选项 → cfg「额外产品」被改写", False, "未找到下拉框，跳过")
+
+    # --- 5b. 测试钩子：F8（展开+选中下一项，走 Unity 事件系统，不依赖坐标标定）---
     if pos:
         cfg_before = A.read_cfg().get("额外产品")
         A.focus_window(hwnd)
@@ -254,9 +286,9 @@ def main():
         A.key_press(hwnd, "F8", foreground=True)
         time.sleep(1.5)
         cfg_after = A.read_cfg().get("额外产品")
-        check("F8 测试钩子：程序化点击选择条 → 改写 cfg", cfg_before != cfg_after,
-              f"{cfg_before} -> {cfg_after}")
-        hook_lines = [l for l in watcher.poll([r"测试点击选择条"]) if "测试点击选择条" in l]
+        check("F8 测试钩子：展开下拉框并选中下一项 → 改写 cfg",
+              str(cfg_before) != str(cfg_after), f"{cfg_before} -> {cfg_after}")
+        hook_lines = [l for l in watcher.poll([r"测试点击下拉框"]) if "测试点击下拉框" in l]
         if hook_lines:
             print("  " + hook_lines[-1].split("] ", 1)[-1])
 

@@ -428,12 +428,20 @@ def explorer_open():
     return any("unityexplorer" in t.lower() for _, t, _, _, _ in find_windows("UnityExplorer"))
 
 
-def close_overlays(hwnd, times=3, settle=0.7):
-    """清掉挡在游戏上的面板：先关 UnityExplorer（F7），再连按 ESC 关掉游戏内弹窗。
+def close_overlays(hwnd, rounds=1, settle=0.6):
+    """把挡在游戏上的面板清掉——**只关 UnityExplorer，绝不按 ESC**。
 
-    实测踩坑（这条是自动化成败关键）：游戏里点建筑可能先弹出**帝国地图/帝国面板**
-    （全屏羊皮纸地图），它盖住一切；此时再点建筑只会点到地图上。
-    所以每次「要点击世界里的东西」之前，都必须先把这类弹窗关掉。
+    ⚠⚠ 这是本项目自动化最贵的一次教训（真实把一局游戏点退了）：
+    ESC 在本游戏是**暂停菜单**开关，菜单里第 6 个按钮就是「退出」。
+    脚本只要「盲按 ESC + 随后往屏幕中间点一下」，就可能点到「退出」，
+    游戏进入「正在结束游戏。。。」永久卡住，后面所有断言全废
+    （日志实证：某轮 e2e 跑到一半游戏自己在退出）。
+    而「暂停菜单检测」在这台机器上极不可靠——我试了三版像素判据，
+    第 1 版 60+ 张世界截图全误报，第 3 版又把「参数设置」窗口误判成暂停菜单
+    （两者都是 6 个金色描边按钮，只是宽度不同）。**结论：不要按 ESC，从源头避免。**
+
+    那帝国地图之类的弹窗怎么关？不用 ESC——直接点建筑本身会把建筑窗口开到前面来；
+    实在被挡住，`open_facility_window` 会重试（换建筑/换角度）。
     """
     if explorer_open():
         focus_window(hwnd)
@@ -441,10 +449,99 @@ def close_overlays(hwnd, times=3, settle=0.7):
         key_press(hwnd, "F7", foreground=True)
         time.sleep(settle)
     focus_window(hwnd)
-    for _ in range(times):
-        time.sleep(0.2)
-        key_press(hwnd, "ESC", foreground=True)
-        time.sleep(settle)
+    time.sleep(0.2)
+
+
+def find_pause_button(hwnd, img=None):
+    """找暂停菜单里最上面那个按钮（「继续游戏」），返回其中心 (x, y) 或 None。
+
+    实测标定（1440×900）：暂停菜单是**竖直 6 个金色描边按钮**（继续游戏/设置/帮助/
+    读档/保存/退出），描边金色约 RGB(168,128,56)（暗）+ 高光更亮，按钮宽约 310–360px、
+    高约 40px、竖直间距约 14px。
+    ⚠ 不要用固定比例坐标：菜单位置会变（实测同一机器上出现过 (512,178) 与 (512,242)），
+    用错坐标就会点到隔壁的**「退出」**，直接把游戏点退（血泪教训）。
+    判据用「至少 3 个等宽金色长条、竖直等距排列」——单个金像素在游戏世界里也有，
+    但三条等宽等距的只有暂停菜单。
+    """
+    try:
+        from PIL import Image
+        if img is None:
+            tmp = Path(tempfile.gettempdir()) / "_dsh_pause_probe.png"
+            grab_screen(tmp)
+            p = wt.POINT(0, 0)
+            user32.ClientToScreen(hwnd, ctypes.byref(p))
+            w, h = client_size(hwnd)
+            img = Image.open(tmp).crop((p.x, p.y, p.x + w, p.y + h))
+            tmp.unlink(missing_ok=True)
+        w, h = img.size
+        rgb = img.convert("RGB")
+        x0, x1 = int(w * 0.38), int(w * 0.62)
+
+        def row_gold(y):
+            xs = [x for x in range(x0, x1) if _is_gold(rgb.getpixel((x, y)))]
+            if len(xs) < 8:
+                return None
+            return min(xs), max(xs)
+
+        hits = []          # [(y, minx, maxx), …]
+        for y in range(int(h * 0.05), int(h * 0.85)):
+            r = row_gold(y)
+            if r and r[1] - r[0] >= 150:      # 按钮描边是「一整条横边」
+                hits.append((y, r[0], r[1]))
+        if len(hits) < 3:
+            return None
+
+        # 连续行分组成条带（按钮的上/下描边各算一条）
+        bands, cur = [], [hits[0]]
+        for t in hits[1:]:
+            if t[0] - cur[-1][0] <= 4:
+                cur.append(t)
+            else:
+                bands.append(cur)
+                cur = [t]
+        bands.append(cur)
+        # 按钮特征：左右边缘 x 基本固定（实测 1440×900 下约 612 与 828，宽约 216）
+        cand = []
+        for b in bands:
+            lo = min(t[1] for t in b)
+            hi = max(t[2] for t in b)
+            cand.append((b[0][0], b[-1][0], lo, hi))
+        if len(cand) < 3:
+            return None
+        base = cand[0]
+        aligned = [c for c in cand
+                   if abs(c[2] - base[2]) <= 12 and abs(c[3] - base[3]) <= 12
+                   and abs((c[3] - c[2]) - (base[3] - base[2])) <= 16]
+        # 暂停菜单有 6 个同宽同位的按钮（上下描边 → 至少 5 条带）；世界里的木墙凑不出来
+        if len(aligned) < 5:
+            return None
+        top = aligned[0]
+        # 第一条带是「继续游戏」按钮的上描边？→ 按钮中心在下一条带附近；
+        # 稳妥取「前两条带的中点」作为按钮中心 y。
+        second = aligned[1] if len(aligned) > 1 else top
+        cy = (top[0] + second[1]) // 2
+        return (top[2] + top[3]) // 2, cy
+    except Exception:
+        return None
+
+
+def _is_gold(p):
+    r, g, b = p
+    return r > 110 and g > 80 and b < 130 and r - b > 45 and r >= g > b
+
+
+def pause_menu_open(hwnd, img=None):
+    """是否停在暂停菜单（能找到金色按钮即算）。"""
+    return find_pause_button(hwnd, img=img) is not None
+
+
+def click_continue(hwnd):
+    """点暂停菜单的「继续游戏」按钮（先定位再点；定位不到就不点，避免误触退出）。"""
+    pos = find_pause_button(hwnd)
+    if pos is None:
+        return False
+    click_client(hwnd, pos[0], pos[1], settle=1.0)
+    return True
 
 
 def click_client(hwnd, x, y, settle=1.2, foreground=True):
@@ -572,6 +669,51 @@ def game_pids():
     return [int(m.group(1)) for m in re.finditer(r'"%s","(\d+)"' % re.escape(GAME_EXE), out)]
 
 
+# ---------------- 系统代理开关（进游戏前必须关掉）----------------
+
+_IE_SETTINGS = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+
+
+def system_proxy_state():
+    """读系统代理设置 → (ProxyEnable, ProxyServer)。"""
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         f"$p=Get-ItemProperty '{_IE_SETTINGS}'; Write-Output \"$($p.ProxyEnable)|$($p.ProxyServer)\""],
+        capture_output=True, text=True, errors="replace").stdout.strip()
+    en, _, server = out.partition("|")
+    return (en.strip() == "1"), server.strip()
+
+
+def set_system_proxy(enable: bool):
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         f"Set-ItemProperty '{_IE_SETTINGS}' -Name ProxyEnable -Value {(1 if enable else 0)}"],
+        capture_output=True)
+
+
+def proxy_off_for_launch():
+    """关掉系统代理，返回原状态以便还原。
+
+    ⚠ 这是进游戏前的必需步骤（实测踩坑，见 docs/开发交接.md §11）：
+    开着系统代理（本机 FlClash 127.0.0.1:7890）时，游戏的 Steamworks UGC 查询会因为
+    **TLS 证书校验失败**（Player.log: `Curl error 35: Cert verify failed`）拿不到创意工坊订阅，
+    工坊 mod 的贴图没进 sprite atlas → `MainScene.Start` 里
+    `BatchSpriteRendererHelper..ctor` 抛 NullReferenceException → 卡在「加载中，请稍候」永远进不去。
+    """
+    was_enabled, server = system_proxy_state()
+    if was_enabled:
+        set_system_proxy(False)
+        time.sleep(3)
+    return was_enabled, server
+
+
+def restore_system_proxy(state):
+    was_enabled, _ = state
+    if was_enabled:
+        set_system_proxy(True)
+        time.sleep(1)
+
+
 def kill_game():
     for pid in game_pids():
         subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
@@ -579,9 +721,18 @@ def kill_game():
 
 
 def launch_game(wait_ready=True, timeout=180):
-    """启动游戏。⚠ 唯一可用通道是 steam:// 协议（直接跑 Territory.exe 会因 Steam 校验秒退）。"""
+    """启动游戏。⚠ 唯一可用通道是 steam:// 协议（直接跑 Territory.exe 会因 Steam 校验秒退）。
+
+    ⚠ 必须用干净环境启动（Start-Process 从 explorer 走，不继承当前 shell 的 env）：
+    实测把 `https_proxy/http_proxy` 带进游戏后，Steamworks 的 UGC 查询会因**证书校验失败**
+    （curl error 35）拿不到创意工坊订阅，工坊 mod 的贴图没注册 → `MainScene.Start` 里
+    `BatchSpriteRendererHelper..ctor` 抛 NullReferenceException → 进去一直卡在「加载中，请稍候」。
+    （这个坑是 AI 自己 push 代码时设了代理留下的，排查记录见 docs/开发交接.md §11。）
+    """
     if not game_pids():
-        subprocess.Popen(["cmd", "/c", "start", "", STEAM_URL], shell=False)
+        env = {k: v for k, v in os.environ.items()
+               if k.lower() not in ("http_proxy", "https_proxy", "all_proxy", "no_proxy")}
+        subprocess.Popen(["cmd", "/c", "start", "", STEAM_URL], shell=False, env=env)
     if wait_ready:
         return wait_api(timeout)
     return True
@@ -627,8 +778,17 @@ def newest_save():
     return dirs[0].name if dirs else None
 
 
-def load_save(name=None, timeout=240, expect_saveLoads=None):
-    """进档并等到 inSave:true 且 saveLoads 增加。返回 (ok, state, 用时秒)。"""
+def load_save(name=None, timeout=240, expect_saveLoads=None, settle=10):
+    """进档并等到 inSave:true 且 saveLoads 增加。返回 (ok, state, 用时秒)。
+
+    ⚠ `settle` 是给游戏留的启动缓冲：UI 一就绪就立刻喊读档，会撞上
+    `MainScene.Start()` 的贴图图集（sprite atlas）初始化竞态 →
+    `BatchSpriteRendererHelper..ctor` 抛 NullReferenceException → 永远卡「加载中」。
+    实测踩坑：早先有一轮 e2e 在 `wait_api` 后多等了 8 秒就顺利进档，
+    而「一就绪就 load」连续失败 5 次（5 个外观预设想各试一遍全挂）。
+    """
+    if settle > 0:
+        time.sleep(settle)
     name = name or newest_save()
     t0 = time.time()
     before = api_state() or {}
@@ -696,6 +856,22 @@ def read_cfg():
             continue
         k, v = line.split("=", 1)
         out[k.strip()] = v.strip()
+    return out
+
+
+def parse_candidates(raw):
+    """解析 cfg「额外产品候选」→ [(id, 名称), …]。"""
+    out = []
+    for seg in (raw or "").replace("，", ",").replace("；", ";").split(","):
+        for s in seg.split(";"):
+            s = s.strip()
+            if ":" not in s:
+                continue
+            a, _, b = s.partition(":")
+            try:
+                out.append((int(a.strip()), b.strip()))
+            except ValueError:
+                continue
     return out
 
 

@@ -31,22 +31,44 @@ DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, 
 # 105040 用 40 起的槽位，跟官方现有 206 行完全不冲突，也便于一眼认出是本 mod 的行。
 FORMULA_SLOT_BASE = 40
 
+# 建筑外观预设：stuff.json 的 prefab / stuff_img / stuff_img_on_map 都换成目标建筑的资源名。
+# 资源名必须**是游戏已有资源**（官方 stuff.json 里 139 座建筑的 prefab 都是裸名，
+# 贴图是 `ui_<id>` 与 `<prefab>_0`，直接照抄不会有找不到资源的问题）。
+# 用法：python _tools/make_defs.py --appearance 磨坊 --deploy
+# ⚠ 建筑尺寸固定 3×3；选 3×3 的原型最省事（4×4 的磨坊会稍微溢出占地格）。
+APPEARANCE_PRESETS = {
+    "采集营地": ("gatherers_hut", "ui_105006", "gatherers_hut_0", "0.4.0 之前的外观（3×2 原型）"),
+    "磨坊":     ("mill2",         "ui_105032", "mill2_0",         "4×4 磨坊：风车造型，最好认"),
+    "交易台":   ("trading_desk",  "ui_103004", "trading_desk_0",  "3×3 交易台：尺寸最贴"),
+    "制造台":   ("workbench",     "ui_105010", "workbench_0",     "3×1 制造台：工坊感"),
+    "熔炉":     ("furnace",       "ui_105028", "furnace_0",       "2×2 熔炉"),
+}
+DEFAULT_APPEARANCE = "磨坊"
+
 
 def load(table: str):
     return json.loads((EXTRA_DATA / f"{table}.json").read_text(encoding="utf-8"))
 
 
-def build_rows():
+def build_rows(appearance: str = DEFAULT_APPEARANCE):
     stuff = load("stuff")
     build = load("build")
     career = load("career")
+
+    if appearance not in APPEARANCE_PRESETS:
+        raise SystemExit(f"未知外观预设「{appearance}」，可选：{'、'.join(APPEARANCE_PRESETS)}")
+    prefab, img, img_on_map, _note = APPEARANCE_PRESETS[appearance]
 
     src_stuff = next(r for r in stuff if r.get("stuff_id") == TEMPLATE_ID)
     new_stuff = dict(src_stuff)
     new_stuff["stuff_id"] = MOD_ID
     new_stuff["stuff_namezh-CN"] = NAME
     new_stuff["desczh-CN"] = DESC
-    # prefab/stuff_img/stuff_img_on_map 随采集营地原样（游戏自带贴图，无需 mod 自带资源）
+    # 外观：prefab（场景里的 3D 模型）+ stuff_img（UI 图标）+ stuff_img_on_map（小地图图标）
+    # 三者必须互相配套，否则会出现「模型是磨坊、图标还是采集营地」的割裂。
+    new_stuff["prefab"] = prefab
+    new_stuff["stuff_img"] = img
+    new_stuff["stuff_img_on_map"] = img_on_map
 
     src_build = next(r for r in build if r.get("id") == TEMPLATE_ID)
     new_build = dict(src_build)
@@ -133,7 +155,17 @@ def build_rows():
 
 
 def main():
-    new_stuff, new_build, new_tech, new_career, new_blueprints = build_rows()
+    argv = sys.argv[1:]
+    appearance = DEFAULT_APPEARANCE
+    if "--appearance" in argv:
+        i = argv.index("--appearance")
+        if i + 1 >= len(argv):
+            raise SystemExit("--appearance 后面要跟外观名")
+        appearance = argv[i + 1]
+
+    new_stuff, new_build, new_tech, new_career, new_blueprints = build_rows(appearance)
+    print(f"外观: {appearance} → prefab={new_stuff['prefab']} "
+          f"img={new_stuff['stuff_img']} on_map={new_stuff['stuff_img_on_map']}")
 
     out_dir = REPO / "Defs"
     out_dir.mkdir(exist_ok=True)
@@ -149,7 +181,7 @@ def main():
         json.dumps(new_blueprints, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"generated: {out_dir}\\stuff.json, build.json, tech.json, career.json, blueprint.json")
 
-    if "--deploy" in sys.argv:
+    if "--deploy" in argv:
         DEF_DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
         for f in ("stuff.json", "build.json", "tech.json", "career.json", "blueprint.json"):
             shutil.copy2(out_dir / f, DEF_DEPLOY_DIR / f)
