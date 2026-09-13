@@ -39,8 +39,8 @@ except Exception:
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "Defs" / "Textures"
 
-# 文件名必须与 CustomSprite.cs 里的 BodyPngName / IconPngName 一致
-BODY_PNG = "super_factory.png"
+# 文件名必须与 CustomSprite.cs 里的 SpriteNamePrefix / IconSpriteName 一致
+SPRITE_PREFIX = "super_factory"     # 4 个朝向：super_factory_0..3
 ICON_PNG = "ui_105050.png"
 
 # ---------------- 调色板（像素风，刻意压住颜色数量） ----------------
@@ -199,22 +199,42 @@ def build_icon(size=64):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    # 清掉历史策略留下的文件（覆盖路线用的 workbench_0 / ui_105010、旧的 textures.xml）
-    for old in ("workbench_0.png", "ui_105010.png", "textures.xml",
-                "super_factory_0.png", f"ui_{105050}.png_tmp"):
+    # 清掉历史策略留下的文件
+    for old in ("workbench_0.png", "ui_105010.png", "textures.xml", "super_factory.png"):
         p = OUT / old
         if p.exists():
             p.unlink()
             print("清理旧文件:", old)
 
-    body = build_body()
-    body.save(OUT / BODY_PNG)
-    build_icon(64).save(OUT / ICON_PNG)
+    src = REPO / "img"
+    if not src.exists():
+        raise SystemExit(f"缺少素材目录 {src}（放 4 张 3×2 建筑图：1_0..1_3.png）")
+
+    # 用户提供的 4 张图 = 建筑的 4 个朝向（1_0..1_3）。直接拷成游戏要的名字。
+    for i in range(4):
+        s = src / f"1_{i}.png"
+        if not s.exists():
+            raise SystemExit(f"缺少素材 {s}")
+        Image.open(s).save(OUT / f"{SPRITE_PREFIX}_{i}.png")
+        print(f"生成: {SPRITE_PREFIX}_{i}.png ← img/1_{i}.png")
+    Image.open(src / "1_0.png").resize((64, 64), Image.LANCZOS).save(OUT / ICON_PNG)
+    print(f"生成: {ICON_PNG} ← img/1_0.png（缩到 64×64 当菜单图标）")
+
+    # ⚠ 必须 action="add"：我们的贴图名游戏本来没有，add 才是「新增图片」。
+    # 之前用 replace 覆盖游戏已有名字，实测不生效（洋红探针世界里 0 个洋红像素）。
+    # 建筑图 anchor 用 "0,0"（左下角对齐占地格），这是官方 mod 教程里建筑图的写法。
+    lines = ['<ModImages version="1">', '']
+    for i in range(4):
+        lines += [f'  <Image', f'      file="{SPRITE_PREFIX}_{i}.png"',
+                  f'      action="add"', f'      anchor="0,0"', f'      />', '']
+    lines += ['  <Image', f'      file="{ICON_PNG}"',
+              '      action="add"', '      anchor="0.5,0.5"', '      />', '', '</ModImages>', '']
+    (OUT / "textures.xml").write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    print("生成: textures.xml（4 个朝向 + 1 个图标，全部 action=add）")
 
     for f in sorted(OUT.iterdir()):
-        print("生成:", f.name, f.stat().st_size, "字节")
+        print("  ", f.name, f.stat().st_size, "字节")
     print("输出目录:", OUT)
-    print("说明: 这两张图由 DLL（CustomSprite.cs）在运行时加载，不需要 textures.xml")
 
 
 if __name__ == "__main__":

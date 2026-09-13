@@ -47,7 +47,7 @@ SUPER_DESC = ("由红砖厂房改建的大型生产设施。安排工人后每�
 # action="replace" 洋红探针实测不生效（详见 make_textures.py 顶部注释）。
 SUPER_PREFAB = "workbench"
 SUPER_IMG = f"ui_{SUPER_ID}"           # 自定义 UI 图标名（DLL 用 SpriteManager.AddSpriteToDic 注册，实测有效）
-SUPER_IMG_ON_MAP = "workbench_0"       # 场景/小地图贴图：用游戏已有的名字，保证一定能解析出模型
+SUPER_IMG_ON_MAP = "super_factory_0"     # 场景贴图：我们自己新增的（textures.xml action="add"），\u65b9\u5411 0
 # 科技：mod 通道加不了新科技树（tech_tree.json 不被读取），按用户要求**取消科技门槛**
 SUPER_TECH_ID = 0
 SUPER_TXT_ID = 300                    # 建造菜单分类段号（与旧建筑同用「食品」段）
@@ -163,13 +163,15 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         })
         return r
 
-    def build_row(sid, model, guide):
+    def build_row(sid, model, guide, cellw=3, cellh=3, door_way=1):
+        """⚠ `cellw/cellh` 必须与所用 prefab 匹配（用户要求超级生产所改成 2×2）。
+        `door_way` 是门位掩码：1 = 只正面开门（官方 2×2 建筑熔炉/酒桶用的就是 1）。"""
         r = dict(src_build)
         r.update({
             "id": sid,
-            "cellw": 3,
-            "cellh": 3,
-            "door_way": 1,            # 3×3 门位掩码（1234 是 3×2 的）
+            "cellw": cellw,
+            "cellh": cellh,
+            "door_way": door_way,
             "res_range": 0,           # 关掉采集营地的野生菜生成——产出全走 DLL，数值精确
             "res_range_anchor": 0,
             "guide_info_zh-CN": guide,
@@ -190,8 +192,10 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         stuff_row(SUPER_ID, SUPER_NAME, SUPER_DESC, SUPER_IMG, SUPER_IMG_ON_MAP, SUPER_PREFAB),
     ]
     build_rows = [
-        build_row(MOD_ID, prefab, guide_common),
-        build_row(SUPER_ID, SUPER_PREFAB, guide_common),
+        build_row(MOD_ID, prefab, guide_common, 3, 3),
+        # 超级生产所：3×2（用户要求；与采集营地同尺寸，贴图也是 3×2 比例），
+        # 外观走「workbench prefab + 运行时换贴图」
+        build_row(SUPER_ID, SUPER_PREFAB, guide_common, 3, 2, door_way=1234),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——
     # 100=初始(0) 200=住所(1) 300=食品(2) 3700=制造(3) 1500=物流(4) 600=路桥(7)。

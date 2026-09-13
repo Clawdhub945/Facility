@@ -1,58 +1,65 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
 namespace FacilityMod;
 
 /// <summary>
-/// 自定义建筑外观的加载器：把 mod 自带的 PNG 变成游戏能用的 `Sprite`，
-/// 再基于场景里**已有一座建筑**的模型克隆出「换了图」的 prefab 给新建筑用。
+/// 自定义建筑外观（超级生产所 105050）——**换贴图**方案。
 ///
-/// 为什么必须这么做（2026-09-13 实测踩坑，两次）：
-/// 1. `Textures/textures.xml` 的 `action="add"` **只能加图片资源**，加不了游戏不认识的新 prefab；
-///    stuff.json 的 `prefab` 写新名字 → 放置建筑时游戏按名字找不到预制体 → `NullReferenceException`。
-/// 2. 改用 `action="replace"` 覆盖已有贴图名（workbench_0）——**实测没生效**：
-///    洋红探针测试里世界里 0 个洋红像素（只有工具栏 14 个）。
+/// ## 为什么是换贴图，而不是新建 prefab（血泪结论）
+/// 试过并全部失败的做法：
+///   1. `textures.xml` + `action="add"` + stuff.json 里写新 prefab 名
+///      → 放置时 `NullReferenceException`（游戏按名字找不到预制体）
+///   2. `action="replace"` 覆盖 `workbench_0` → 洋红探针实测不生效（世界里 0 个洋红像素）
+///   3. DLL 运行时自造 GameObject 当 prefab + 拦 `PrefabManager` 入口
+///      → 贴图/prefab/图标都建成功了，但游戏**从不请求我们自造的名字**
+///        （日志抓到的一直是 `workbench_0`），模型解析受 `class_name` 约束
 ///
-/// 现在的 DLL 路线：运行时自己造 Sprite → 克隆模板模型换图 →
-/// Harmony 拦 `PrefabManager.GetPrefab("super_factory")` 返回这个克隆。
-/// 完全不依赖游戏美术资源，改图只要换 PNG 重启游戏。
+/// **可行做法（本文件实现，来自作者侧验证过的方案）**：
+///   * stuff.json 的 `prefab` 用**游戏已有的** prefab（`workbench`）
+///   * 贴图用 `textures.xml` 的 `action="add"` 注册成自己的名字（`super_factory_0` 等）
+///   * 建筑造好后，**直接把这栋建筑的 SpriteRenderer.sprite / MySpriteRenderer.sprite_id 换成我们的图**
+///     （`Harmony` 挂在 `BuildHelper.DoBuildFacility` 的 Postfix 上）
+///
+/// ## 游戏有两套渲染，必须都改（否则贴图是透明的）
+///   1. `MySpriteRenderer`（游戏自绘批渲染）——只认 `sprite_id`，改完要
+///      `SetActive(false/true)` 或 `RefreshBody()` 才刷新
+///   2. 原生 `SpriteRenderer` —— 兜底直接 `sr.sprite = ...`
 /// </summary>
 internal static class CustomSprite
 {
-    /// <summary>本 mod 自定义外观对应的 prefab 名（与 Defs/stuff.json 的 prefab 字段一致）</summary>
-    internal const string CustomPrefabName = "super_factory";
+    /// <summary>被替换外观的建筑 id</summary>
+    internal const int TargetStuffId = Plugin.SuperFacilityId;
 
-    /// <summary>
-    /// 游戏解析建筑外观时用的名字 = `stuff_img_on_map`，即 **`<prefab>_0`**（带 `_0` 后缀）。
-    /// 实测证据：日志里旧建筑（prefab=workbench）发出的是
-    /// `PrefabManager` 入口请求 `"workbench_0"`，而不是 `"workbench"`。
-    /// 所以自定义外观必须**同时认这两个名字**，只认 `super_factory` 会漏掉真正的请求。
-    /// </summary>
-    internal const string CustomSpriteName = CustomPrefabName + "_0";
+    /// <summary>贴图资源名前缀：4 个朝向分别是 `super_factory_0..3`</summary>
+    internal const string SpriteNamePrefix = "super_factory";
 
-    /// <summary>请求的名字是否属于我们的自定义外观</summary>
-    internal static bool IsCustomName(string? name)
-        => name == CustomPrefabName || name == CustomSpriteName;
+    /// <summary>UI 图标资源名（= Defs/stuff.json 的 stuff_img）</summary>
+    internal const string IconSpriteName = "ui_105050";
 
-    /// <summary>
-    /// 自定义外观建不出来时的**保底 prefab**：一个游戏自带的建筑 prefab。
-    /// 用途：保证「超级生产所」在任何情况下都能被建造（外观退化成原版建筑），
-    /// 而不是让玩家点一下吃 NullReferenceException、完全放不下去。
-    /// </summary>
-    internal const string FallbackPrefabName = "workbench";
+    /// <summary>朝向数量（游戏建筑 4 向旋转，贴图 0..3 对应）</summary>
+    private const int RotationCount = 4;
 
-    private const string BodyPngName = "super_factory.png";
-    private const string IconPngName = "ui_105050.png";
+    /// <summary>PNG 文件名（放在插件目录 Textures/ 下）</summary>
+    private static readonly string[] BodyPngs =
+    {
+        "super_factory_0.png", "super_factory_1.png",
+        "super_factory_2.png", "super_factory_3.png",
+    };
+    private const string IconPng = "ui_105050.png";
 
-    private static Sprite? _bodySprite;
+    /// <summary>每个朝向的 Sprite（下标 = rotation）</summary>
+    private static readonly Sprite?[] _bodySprites = new Sprite?[RotationCount];
     private static Sprite? _iconSprite;
-    private static GameObject? _customPrefab;
-    private static bool _tried;
-    private static bool _failed;
+    private static bool _iconRegistered;
+    private static bool _spritesLoaded;
+
+    // ------------------------------------------------------------------
+    // 贴图加载
+    // ------------------------------------------------------------------
 
     private static string PluginDir
     {
@@ -68,7 +75,6 @@ internal static class CustomSprite
         }
     }
 
-    /// <summary>找 PNG：插件目录/Textures、插件目录、TerritoryModTest/Textures 都试一遍</summary>
     private static string? FindPng(string fileName)
     {
         var dir = PluginDir;
@@ -86,6 +92,10 @@ internal static class CustomSprite
         return null;
     }
 
+    /// <summary>
+    /// 把 PNG 读成 Sprite。pivot 用左下角 (0,0)：建筑贴图要跟占地格左下角对齐
+    /// （官方 mod 教程里建筑图的 anchor 就是 `0,0`）。
+    /// </summary>
     private static Sprite? LoadSprite(string fileName, float pixelsPerUnit, Vector2 pivot)
     {
         try
@@ -93,21 +103,19 @@ internal static class CustomSprite
             string? path = FindPng(fileName);
             if (path == null)
             {
-                Plugin.LogV($"[Facility] 找不到自定义贴图 {fileName}" +
-                                  "（找过 插件目录/Textures、插件目录、TerritoryModTest/Textures）");
+                Plugin.LogV($"[Facility] 找不到贴图 {fileName}");
                 return null;
             }
 
             byte[] bytes = File.ReadAllBytes(path);
             var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-            // IL2CPP 下 C# byte[] → Il2CppStructArray<byte> 有隐式转换（CS0571：不能显式调 op_Implicit）
             Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<byte> arr = bytes;
             if (!ImageConversion.LoadImage(tex, arr, false))
             {
-                Plugin.LogV($"[Facility] LoadImage 失败: {path}");
+                Plugin.LogError($"[Facility] LoadImage 失败: {path}");
                 return null;
             }
-            tex.filterMode = FilterMode.Point;    // 像素风：不做插值
+            tex.filterMode = FilterMode.Point;      // 像素风不插值
             tex.wrapMode = TextureWrapMode.Clamp;
             tex.hideFlags = HideFlags.HideAndDontSave;
 
@@ -115,405 +123,252 @@ internal static class CustomSprite
             var sprite = Sprite.Create(tex, rect, pivot, pixelsPerUnit, 0,
                                        SpriteMeshType.FullRect, Vector4.zero);
             sprite.hideFlags = HideFlags.HideAndDontSave;
-            Plugin.LogV($"[Facility] 自定义贴图已加载: {Path.GetFileName(path)} " +
-                           $"{tex.width}×{tex.height} ppu={pixelsPerUnit} pivot=({pivot.x:0.##},{pivot.y:0.##})");
+            Plugin.LogV($"[Facility] 贴图已加载 {Path.GetFileName(path)} {tex.width}×{tex.height} ppu={pixelsPerUnit}");
             return sprite;
         }
         catch (Exception ex)
         {
-            Plugin.LogError($"[Facility] 加载自定义贴图 {fileName} 异常: {ex}");
+            Plugin.LogError($"[Facility] 加载贴图 {fileName} 异常: {ex}");
             return null;
         }
     }
 
     /// <summary>
-    /// 把「已经造好的一座本 mod 建筑」当模板：
-    /// 找它身上面积最大的 SpriteRenderer（= 建筑本体那张图），
-    /// 克隆整个建筑 GameObject 再把那张图换成我们的。
+    /// ppu 决定模型在世界里的物理大小，必须跟游戏建筑贴图一致。
+    /// 实测取不到游戏原图的 ppu（`SpriteManager.Get("workbench_0")` 返回 null），
+    /// 所以用**推算值 64**：游戏一格 = 64 像素（官方 mod 教程里 3×3 建筑示例
+    /// `kingdom_treasure_box_0.png` = 192×192 = 3×64），建筑图 ppu 就等于每格像素数。
+    /// 如果进游戏发现模型比占地格大/小，就调这个值（大→调大，小→调小）。
     /// </summary>
-    private static GameObject? FindTemplateFromScene()
+    private const float DefaultPixelsPerUnit = 64f;
+
+    private static float BasePixelsPerUnit()
     {
-        try
+        foreach (var name in new[] { "workbench_0", "gatherers_hut_0", "mine_0" })
         {
-            var all = UnityEngine.Object.FindObjectsOfType<Facility>();
-            if (all == null) return null;
-            foreach (var f in all)
+            try
             {
-                if (f == null || !Plugin.IsManaged(f.stuff_id)) continue;
-                var go = f.gameObject;
-                if (go == null) continue;
-                Plugin.LogV($"[Facility] 用场景里的建筑当模板: {go.name} (stuff={f.stuff_id})");
-                return go;
+                var s = SpriteManager.Get(name);
+                if (s != null && s.pixelsPerUnit > 1f) return s.pixelsPerUnit;
             }
+            catch { }
         }
-        catch (Exception ex) { Plugin.LogV($"[Facility] 找模板建筑失败: {ex.Message}"); }
-        return null;
+        return DefaultPixelsPerUnit;
     }
 
-    /// <summary>在模板里挑「面积最大的 SpriteRenderer」——建筑本体一般是最大的那张图</summary>
-    private static SpriteRenderer? PickBodyRenderer(GameObject template)
+    private static void EnsureSprites()
     {
-        SpriteRenderer? best = null;
-        float bestArea = -1f;
-        try
+        if (_spritesLoaded) return;
+        float ppu = BasePixelsPerUnit();
+        int ok = 0;
+        for (int i = 0; i < RotationCount; i++)
         {
-            foreach (var sr in template.GetComponentsInChildren<SpriteRenderer>(true))
-            {
-                if (sr == null || sr.sprite == null) continue;
-                var s = sr.sprite.rect.size;
-                float area = s.x * s.y;
-                if (area > bestArea)
-                {
-                    bestArea = area;
-                    best = sr;
-                }
-            }
+            if (_bodySprites[i] != null) { ok++; continue; }
+            _bodySprites[i] = LoadSprite(BodyPngs[i], ppu, Vector2.zero);
+            if (_bodySprites[i] != null) ok++;
         }
-        catch (Exception ex) { Plugin.LogV($"[Facility] 挑本体渲染器失败: {ex.Message}"); }
-        return best;
+        if (_iconSprite == null) _iconSprite = LoadSprite(IconPng, ppu, new Vector2(0.5f, 0.5f));
+        if (ok == RotationCount) _spritesLoaded = true;
+        if (ok > 0)
+            Plugin.LogV($"[Facility] 自定义外观贴图：{ok}/{RotationCount} 个朝向已加载（ppu={ppu}）");
+    }
+
+    /// <summary>取某个朝向的贴图（越界就回落到 0）</summary>
+    internal static Sprite? BodySprite(int rotation)
+    {
+        EnsureSprites();
+        if (rotation < 0 || rotation >= RotationCount) rotation = 0;
+        return _bodySprites[rotation] ?? _bodySprites[0];
+    }
+
+    // ------------------------------------------------------------------
+    // 图标：注册进游戏贴图表（建造菜单用）
+    // ------------------------------------------------------------------
+
+    internal static Sprite? IconSprite
+    {
+        get
+        {
+            EnsureSprites();
+            return _iconSprite;
+        }
     }
 
     /// <summary>
-    /// 自定义 UI 图标的哨兵 id：`SpriteManager.TryGetSpriteId("ui_105050")` 被拦下时返回它，
-    /// `SpriteManager.GetSprite(id)` 再按它取我们的 Sprite。
-    /// 用负数，和游戏自己的贴图 id（正整数）不会撞。
+    /// 取 `SpriteManager` 实例。
+    /// ⚠ 静态字段 `Ins` 实测一直是 null（它不是静态单例），所以退回 `FindObjectOfType` 找场景实例，
+    /// 找到了就缓存（后面每次换贴图都要用，不能每帧 Find）。
     /// </summary>
-    internal const int IconSentinelId = -105050;
-
-    /// <summary>只加载图标（场景里还没有建筑时也能让菜单图标正常）</summary>
-    internal static Sprite? EnsureIconOnly()
+    private static SpriteManager? _sm;
+    internal static SpriteManager? Manager
     {
-        if (_iconSprite == null) _iconSprite = LoadSprite(IconPngName, 100f, new Vector2(0.5f, 0.5f));
-        return _iconSprite;
+        get
+        {
+            if (_sm != null) return _sm;
+            try
+            {
+                var f = AccessTools.Field(typeof(SpriteManager), "Ins");
+                _sm = f?.GetValue(null) as SpriteManager;
+            }
+            catch { }
+            if (_sm == null)
+            {
+                try { _sm = UnityEngine.Object.FindObjectOfType<SpriteManager>(); } catch { }
+            }
+            return _sm;
+        }
     }
 
-    /// <summary>自定义 UI 图标的资源名（= Defs/stuff.json 里超级生产所的 stuff_img）</summary>
-    internal const string IconSpriteName = "ui_105050";
-
-    internal static Sprite? IconSprite => _iconSprite;
-
-    /// <summary>是否已经用 `AddSpriteToDic` 把图标注册进游戏贴图表</summary>
-    private static bool _iconRegistered;
-
     /// <summary>
-    /// 把图标注册进游戏的贴图表（建造菜单图标就靠这个）。
-    ///
-    /// 实测要点（dump 出来的方法清单 + interop 签名核对）：
-    ///   * 单例是 **静态字段 `SpriteManager.Ins`**（`get_Ins` 的 native 签名里返回类型是 D，
-    ///     interop 没给出 C# 属性），所以用反射读字段。
-    ///   * `AddSpriteToDic(string, Sprite)` 在 native 签名里是 **Private**，也要反射调。
-    /// 注册后游戏按 `stuff_img`（`ui_105050`）查表即可拿到我们的图，菜单不再是白块。
-    ///
-    /// （早期版本试着拦 `TryGetSpriteId`/`GetSprite` 反而踩坑：
-    ///   多个不同签名的方法塞进同一个补丁类 → `IL Compile Error`；
-    ///   而且 `GetSprite(int)` 根本不存在，真正的是 `GetSprite(SpriteId)`。）
+    /// 把图标注册进游戏的贴图表（`SpriteManager.AddSpriteToDic`，私有方法，靠反射调）。
     /// </summary>
     internal static bool RegisterIcon()
     {
         if (_iconRegistered) return true;
         try
         {
-            var icon = EnsureIconOnly();
+            var icon = IconSprite;
             if (icon == null) return false;
 
-            object? smObj = null;
-            // 先试静态字段 Ins；实测它一直是 null（不是静态单例），
-            // 所以在场景里按类型找一个实例（SpriteManager 是 MonoBehaviour）。
-            try
-            {
-                var f = AccessTools.Field(typeof(SpriteManager), "Ins");
-                if (f != null) smObj = f.GetValue(null);
-            }
-            catch (Exception ex) { Plugin.LogV($"[Facility] 读 SpriteManager.Ins 失败: {ex.Message}"); }
-            if (smObj is not SpriteManager sm)
-            {
-                try { sm = UnityEngine.Object.FindObjectOfType<SpriteManager>(); }
-                catch (Exception ex) { Plugin.LogV($"[Facility] FindObjectOfType<SpriteManager> 失败: {ex.Message}"); sm = null!; }
-            }
-            if (sm == null)
-            {
-                Plugin.LogV("[Facility] 还没找到 SpriteManager 实例，图标注册稍后再试");
-                return false;
-            }
+            var sm = Manager;
+            if (sm == null) return false;
 
             var m = AccessTools.Method(typeof(SpriteManager), "AddSpriteToDic",
                                        new[] { typeof(string), typeof(Sprite) });
             if (m == null)
             {
-                Plugin.LogV("[Facility] 找不到 AddSpriteToDic(string,Sprite)，图标注册跳过（菜单会显示白块）");
+                Plugin.LogV("[Facility] 找不到 AddSpriteToDic(string,Sprite)");
                 return false;
             }
             m.Invoke(sm, new object[] { IconSpriteName, icon });
             _iconRegistered = true;
-            Plugin.LogV($"[Facility] 自定义图标已注册进游戏贴图表: {IconSpriteName}");
-            // 回查一次：注册后能不能按名字查回来。查不回来说明字典不是同一个 / 注册没生效
-            try
-            {
-                var got = ((SpriteManager)sm).TryGetSpriteId(IconSpriteName);
-                Plugin.LogV($"[Facility] 图标回查 TryGetSpriteId(\"{IconSpriteName}\") = {got}");
-            }
-            catch (Exception ex) { Plugin.LogV($"[Facility] 图标回查失败: {ex.Message}"); }
+            Plugin.LogV($"[Facility] 图标已注册进游戏贴图表: {IconSpriteName}");
             return true;
         }
         catch (Exception ex)
         {
-            Plugin.LogV($"[Facility] 注册自定义图标失败（菜单会显示白块）: {ex.Message}");
+            Plugin.LogV($"[Facility] 注册图标失败: {ex.Message}");
             return false;
         }
     }
 
-    /// <summary>
-    /// 造一个 `SpriteId` 结构体，承载哨兵 id。
-    /// ⚠ 不用 `new SpriteId(...)`：interop 里 `SpriteId` 的构造函数没有绑定，
-    /// 只能用反射找「单 int 参数的构造」。
-    /// </summary>
-    internal static object? MakeSpriteId(int id)
-    {
-        try
-        {
-            if (_spriteIdCtor == null)
-            {
-                foreach (var c in typeof(SpriteId).GetConstructors(
-                             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-                {
-                    var ps = c.GetParameters();
-                    if (ps.Length == 1 && ps[0].ParameterType == typeof(int)) { _spriteIdCtor = c; break; }
-                }
-            }
-            if (_spriteIdCtor == null)
-            {
-                Plugin.LogV("[Facility] SpriteId(int) 构造没找到，图标走不通");
-                return null;
-            }
-            return _spriteIdCtor.Invoke(new object[] { id });
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogV($"[Facility] 构造 SpriteId 失败: {ex.Message}");
-            return null;
-        }
-    }
-
-    private static ConstructorInfo? _spriteIdCtor;
+    // ------------------------------------------------------------------
+    // 核心：给一栋刚建好的建筑换外观
+    // ------------------------------------------------------------------
 
     /// <summary>
-    /// 自己**从零搭**一个建筑 prefab，而不是克隆整座建筑：
-    /// 克隆整座 Facility 会把 BagController / FacilityWork / UI 引用一起复制，
-    /// 放置时容易炸（实测用户在放置预览阶段就吃到 NullReferenceException）。
-    /// 这里只复制「怎么画」的部分：渲染器的 material / sortingOrder / scale，加一个 BoxCollider2D 供射线命中。
+    /// 把某栋建筑的模型换成我们的贴图（rotation 决定用哪张）。
+    /// 两套渲染都要改：MySpriteRenderer 认 sprite_id，原生 SpriteRenderer 认 sprite。
     /// </summary>
-    private static GameObject? BuildPrefabFromScratch(SpriteRenderer? template)
+    internal static void ApplyAppearance(Facility facility, int rotation)
     {
-        var go = new GameObject(CustomPrefabName);
-        go.hideFlags = HideFlags.HideAndDontSave;
-        UnityEngine.Object.DontDestroyOnLoad(go);
-
-        var sr = go.AddComponent<SpriteRenderer>();
-        if (_bodySprite != null) sr.sprite = _bodySprite;
-        if (template != null)
+        if (facility == null) return;
+        var sprite = BodySprite(rotation);
+        if (sprite == null)
         {
-            try { sr.sharedMaterial = template.sharedMaterial; } catch { }
-            try { sr.sortingLayerID = template.sortingLayerID; } catch { }
-            try { sr.sortingOrder = template.sortingOrder; } catch { }
-            try { go.transform.localScale = template.transform.lossyScale; } catch { }
+            Plugin.LogV("[Facility] 自定义外观贴图没加载出来，保持原样");
+            return;
         }
 
-        // 不再加碰撞盒：建筑的点击由游戏自己的设施系统处理（它按格子/实体表命中），
-        // 而且加 BoxCollider2D 需要额外引用 UnityEngine.Physics2DModule。
-        // 少一个组件就少一个炸点。
-
-        Plugin.LogV($"[Facility] 自定义 prefab「{CustomPrefabName}」已就绪（自建 GameObject + SpriteRenderer）");
-        return go;
-    }
-
-    internal static GameObject? EnsurePrefab()
-    {
-        if (_tried) return _customPrefab;
-        _tried = true;
+        int native = 0, custom = 0;
         try
         {
-            // 模板只用来参考「渲染器怎么设的」（ppu/pivot/材质/排序层）。
-            // 拿不到也能建（用默认值），所以**不再因为场景里没有建筑就放弃**——
-            // 早期版本那样做，导致插件的 Load 阶段建不出 prefab，而 Def 恰恰在那时解析。
-            SpriteRenderer? template = null;
-            try
+            // ① 游戏自绘批渲染（MySpriteRenderer）：只认 sprite_id
+            var spBody = facility.sp_body;
+            if (spBody != null)
             {
-                var tplGo = FindTemplateFromScene();
-                if (tplGo != null) template = PickBodyRenderer(tplGo);
-            }
-            catch (Exception ex) { Plugin.LogV($"[Facility] 取模板参考失败（用默认值继续）: {ex.Message}"); }
-
-            float ppu = 100f;
-            Vector2 pivot = Vector2.zero;
-            if (template?.sprite != null)
-            {
-                try { ppu = template.sprite.pixelsPerUnit; } catch { }
                 try
                 {
-                    var sz = template.sprite.rect.size;
-                    pivot = new Vector2(template.sprite.pivot.x / sz.x, template.sprite.pivot.y / sz.y);
+                    var sm = Manager;
+                    if (sm != null)
+                    {
+                        string spriteName = SpriteNamePrefix + "_" + rotation;
+                        spBody.sprite_id = sm.TryGetSpriteId(spriteName);
+                        custom++;
+                        Plugin.LogV($"[Facility] sprite_id ← {spriteName}");
+                    }
+                    else Plugin.LogV("[Facility] 拿不到 SpriteManager 实例，跳过 sprite_id");
                 }
-                catch { }
+                catch (Exception ex) { Plugin.LogV($"[Facility] 设置 sprite_id 失败: {ex.Message}"); }
+
+                // 必须强制刷新：MySpriteRenderer 不会自己发现 sprite_id 变了
+                try
+                {
+                    spBody.gameObject.SetActive(false);
+                    spBody.gameObject.SetActive(true);
+                }
+                catch (Exception ex) { Plugin.LogV($"[Facility] 刷新渲染失败（可忽略）: {ex.Message}"); }
             }
 
-            _bodySprite = LoadSprite(BodyPngName, ppu, pivot);
-            if (_bodySprite == null)
+            // ② 原生 SpriteRenderer 兜底（有些 prefab 用原生渲染）
+            foreach (var sr in facility.gameObject.GetComponentsInChildren<SpriteRenderer>(true))
             {
-                _failed = true;
-                return null;
+                if (sr == null) continue;
+                sr.sprite = sprite;
+                sr.enabled = true;
+                native++;
             }
-            _iconSprite = LoadSprite(IconPngName, 100f, new Vector2(0.5f, 0.5f));
-
-            _customPrefab = BuildPrefabFromScratch(template);
-            TryRegisterInDictionary();
-            return _customPrefab;
         }
         catch (Exception ex)
         {
-            _failed = true;
-            Plugin.LogError($"[Facility] 构建自定义 prefab 失败: {ex}");
-            return null;
+            Plugin.LogError($"[Facility] 换外观失败: {ex}");
         }
+        Plugin.LogV($"[Facility] 超级生产所外观已替换（朝向 {rotation}：自定义渲染 {custom} 个 / 原生渲染 {native} 个）");
     }
 
-    internal static bool HasFailed => _failed;
-
-    /// <summary>
-    /// 取一份**新的**自定义外观实例（每次实例化一份，不能把同一个 GameObject 交给游戏两次）。
-    /// 模板还没准备好时返回 null（调用方回退原逻辑，宁可外观不对也别让建筑炸）。
-    /// </summary>
-    internal static GameObject? NewInstance()
-    {
-        var tpl = EnsurePrefab();
-        if (tpl == null) return null;
-        try
-        {
-            var go = UnityEngine.Object.Instantiate(tpl);
-            go.name = CustomPrefabName;
-            return go;
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogError($"[Facility] 实例化自定义外观失败: {ex}");
-            return null;
-        }
-    }
-
-    /// <summary>把自定义 prefab 写进 PrefabManager 的字典（若可写），让游戏按名字查表也能拿到</summary>
-    internal static bool TryRegisterInDictionary()
+    /// <summary>给「所有已存在的」超级生产所补一次外观（读档/热重载后用）</summary>
+    internal static void ReapplyToAll()
     {
         try
         {
-            var tpl = EnsurePrefab();
-            if (tpl == null) return false;
-            var fld = AccessTools.Field(typeof(PrefabManager), "prefab_dic");
-            if (fld == null) return false;
-            var dic = fld.GetValue(null) as System.Collections.IDictionary;
-            if (dic == null) return false;
-            dic[CustomPrefabName] = tpl;
-            Plugin.LogV($"[Facility] 已把「{CustomPrefabName}」注册进 PrefabManager.prefab_dic");
-            return true;
+            var all = UnityEngine.Object.FindObjectsOfType<Facility>();
+            if (all == null) return;
+            int n = 0;
+            foreach (var f in all)
+            {
+                if (f == null || f.stuff_id != TargetStuffId) continue;
+                ApplyAppearance(f, 0);
+                n++;
+            }
+            if (n > 0) Plugin.LogV($"[Facility] 已给 {n} 座已存在的超级生产所补上外观");
         }
-        catch (Exception ex)
-        {
-            Plugin.LogV($"[Facility] 注册 prefab_dic 失败（不影响补丁路线）: {ex.Message}");
-            return false;
-        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 补外观失败: {ex.Message}"); }
     }
 }
 
 /// <summary>
-/// 让游戏拿到我们的自定义建筑外观。**三个入口都拦**（只拦一个不够——实测
-/// `PrefabManager.GetPrefab(string,int)` 是私有方法，`AccessTools.Method` 默认找不到，
-/// 而且它在 interop 里没有 C# 绑定；更不能让它把 `PatchAll()` 整条挂掉，
-/// 那会连带工位数补丁一起失效——这是 2026-09-13 的真实事故）：
+/// 挂钩建筑创建：让游戏**用 workbench 的预制体**去造我们的建筑
+/// （stuff.json 里 prefab 写的就是 workbench，这里只是保险 + 拿到返回值换贴图）。
 ///
-///   1. `PrefabManager.Create(string, Transform)`  ← 公开、有绑定，最可能被用的入口
-///   2. `PrefabManager.Get(string)`               ← 公开、有绑定
-///   3. `PrefabManager.GetPrefab(string, int)`    ← 私有，用反射带 NonPublic 找
-///
-/// 命中时返回一份**新的实例**（不能返回同一个 GameObject 两次）。
+/// `BuildHelper.DoBuildFacility(int stuff_id, int rotation, Vector3 pos, int ..., bool ...)` 是私有方法，
+/// 参数里有 `__result`（Facility），建好后我们直接换它的贴图。
 /// </summary>
 [HarmonyPatch]
-internal static class CustomPrefabPatch
+internal static class CustomAppearancePatch
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
-    static IEnumerable<MethodBase> TargetMethods()
+    static System.Reflection.MethodBase? TargetMethod()
     {
-        var list = new List<MethodBase>();
-        var seen = new HashSet<string>();
-        var flags = BindingFlags.Public | BindingFlags.NonPublic |
-                    BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
-
-        // ⚠ 必须**顺着继承链**枚举：实测 `PrefabManager` 自己的方法清单里没有
-        // GetPrefab（只有 Get/Create/TryGetFromCache…），它在基类上。
-        // `AccessTools.Method` 默认只找声明的类型，所以之前才找不到。
-        for (var t = typeof(PrefabManager); t != null && t != typeof(object); t = t.BaseType)
+        var t = AccessTools.TypeByName("BuildHelper");
+        if (t == null)
         {
-            MethodInfo[] ms;
-            try { ms = t.GetMethods(flags); } catch { continue; }
-            foreach (var m in ms)
-            {
-                bool interesting = m.Name == "GetPrefab" || m.Name == "Get" || m.Name == "Create";
-                if (!interesting) continue;
-                var ps = m.GetParameters();
-                if (ps.Length < 1 || ps[0].ParameterType != typeof(string)) continue;
-                if (m.ReturnType != typeof(GameObject)) continue;
-                if (!seen.Add(m.DeclaringType?.Name + "." + m.Name + "/" + ps.Length)) continue;
-                list.Add(m);
-            }
+            Plugin.LogError("[Facility] 找不到 BuildHelper 类型，自定义外观补丁未挂上");
+            return null;
         }
-
-        if (list.Count == 0)
-            Plugin.LogError("[Facility] 没找到任何 PrefabManager 入口，自定义外观补丁未挂上");
-        else
-            Plugin.LogV($"[Facility] 自定义外观补丁已挂 {list.Count} 个入口: " +
-                           string.Join(", ", list.ConvertAll(m => $"{m.DeclaringType?.Name}.{m.Name}/{m.GetParameters().Length}")));
-        return list;
+        var m = AccessTools.Method(t, "DoBuildFacility");
+        if (m == null)
+            Plugin.LogError("[Facility] 找不到 BuildHelper.DoBuildFacility，自定义外观补丁未挂上");
+        return m;
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
-    static bool Prefix(string __0, ref GameObject __result)
+    static void Postfix(int stuff_id, int rotation, Facility __result)
     {
         try
         {
-            // 全量记录（仅详细模式）：抓清游戏到底用什么名字、走哪个入口取 prefab。
-            // 排查「放置建筑时空引用」时就靠这个 —— 就是靠它发现名字带 `_0` 后缀的。
-            if (__0 != null && (__0.Contains("factory") || __0.Contains("workbench")))
-                Plugin.LogV($"[Facility] prefab 入口请求: \"{__0}\"");
-
-            if (!CustomSprite.IsCustomName(__0)) return true;
-
-            // 第一优先：我们自己的红砖厂房
-            var go = CustomSprite.NewInstance();
-            if (go != null)
-            {
-                Plugin.LogV($"[Facility] 自定义外观入口命中（{__0}）→ 已返回自有 prefab 实例");
-                __result = go;
-                return false;
-            }
-
-            // **保底**：自定义 prefab 建不出来时，退回一个游戏已有的建筑 prefab，
-            // 保证建筑一定能放下去（只是外观不是我们画的）。
-            // 这条兜底的意义：宁可外观不对，也不能让用户「点一下就报空引用、放不下去」。
-            try
-            {
-                var fallback = PrefabManager.Get(CustomSprite.FallbackPrefabName);
-                if (fallback != null)
-                {
-                    Plugin.LogError($"[Facility] 自定义外观不可用，已退回游戏预制体" +
-                                    $"「{CustomSprite.FallbackPrefabName}」（建筑可正常建造，但外观不是自定义的）");
-                    __result = UnityEngine.Object.Instantiate(fallback);
-                    return false;
-                }
-            }
-            catch (Exception ex) { Plugin.LogV($"[Facility] 取保底 prefab 失败: {ex.Message}"); }
-            return true;
+            if (stuff_id != CustomSprite.TargetStuffId) return;
+            CustomSprite.ApplyAppearance(__result, rotation);
         }
-        catch (Exception ex)
-        {
-            Plugin.LogError($"[Facility] 自定义外观补丁异常: {ex}");
-            return true;
-        }
+        catch (Exception ex) { Plugin.LogError($"[Facility] 外观补丁异常: {ex}"); }
     }
 }

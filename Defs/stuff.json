@@ -36,7 +36,7 @@
     "effect_value": 0.0,
     "prefab": "workbench",
     "stuff_img": "ui_105050",
-    "stuff_img_on_map": "workbench_0",
+    "stuff_img_on_map": "super_factory_0",
     "weight": 1.0,
     "reward_count_once": 0,
     "op_increase_step": 1,

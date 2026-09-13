@@ -37,9 +37,15 @@ def supers():
     return [e for e in entities() if e.get("stuffId") == 105050]
 
 
-def rescan():
-    A.api_post("/api/editor/scan", None, timeout=200)
-    for _ in range(30):
+def rescan(timeout=300):
+    """重扫实体。⚠ 这台机器实体 2 万多，扫描偶尔会超时（HTTP 408），
+    所以失败不当致命错误——后面用缓存数据继续判断，避免整条流程中断。"""
+    try:
+        A.api_post("/api/editor/scan", None, timeout=timeout)
+    except Exception as ex:
+        print(f"  （重扫请求失败，改用缓存: {type(ex).__name__}）")
+        return False
+    for _ in range(40):
         if not (A.api_state() or {}).get("scanning"):
             return True
         time.sleep(3)

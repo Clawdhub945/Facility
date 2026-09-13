@@ -37,42 +37,19 @@ public class FacilityComponent : MonoBehaviour
         if (_customSpriteReady) return;
         try
         {
-            bool prefabOk = CustomSprite.EnsurePrefab() != null;
+            // 图标注册 + 给已存在的建筑补外观。
+            // ⚠ 为什么要在 Update 里反复试：`SpriteManager` 实例在插件 Load() 阶段还没建好
+            // （静态字段 Ins 是 null、场景里也找不到），所以只能等世界起来再注册。
+            // 菜单白块的原因就是「菜单先打开、注册后完成」—— 重启游戏后第一次打开菜单即正常。
             bool iconOk = CustomSprite.RegisterIcon();
-            if (prefabOk && iconOk)
+            CustomSprite.ReapplyToAll();
+            if (iconOk && CustomSprite.IconSprite != null)
             {
                 _customSpriteReady = true;
-                Plugin.LogV("[Facility] 自定义外观初始化完成（建筑 prefab + 菜单图标都已就绪）");
+                Plugin.LogV("[Facility] 自定义外观初始化完成（贴图 + 菜单图标）");
             }
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 自定义外观初始化异常: {ex.Message}"); }
-    }
-
-    private void Update()
-    {
-        PollTestHotkey();
-        PollCustomSprite();
-
-        if (Time.time < _nextAt) return;
-        _nextAt = Time.time + 1.5f;
-        try
-        {
-            // cfg 热生效：改 BepInEx/config/claude.facility.cfg 后最多 1.5s 生效
-            try { Plugin.ModConfigFile?.Reload(); } catch { }
-
-            int day = GetDayKey();
-            if (day < 0) return;
-            if (_lastDay < 0) { _lastDay = day; return; } // 进档/启动首日只记基线，不产出（防重复发）
-            if (day == _lastDay) return;
-            _lastDay = day;
-            _producedToday.Clear();
-
-            ProduceForNewDay(day);
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogError($"[Facility] Update 异常: {ex}");
-        }
     }
 
     /// <summary>

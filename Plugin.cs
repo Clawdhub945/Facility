@@ -107,7 +107,7 @@ public class Plugin : BasePlugin
             foreach (var t in new[]
                      {
                          typeof(FacilityGetOriginalWorkPosCountPatch),
-                         typeof(CustomPrefabPatch),
+                         typeof(CustomAppearancePatch),
                          typeof(FacilityWindowSetInfoPatch),
                          typeof(FacilityWindowRefreshPatches),
                      })
@@ -134,8 +134,8 @@ public class Plugin : BasePlugin
         // stuff.json 里的 prefab，那一刻要是拿不到，建筑就是「没有模型」的状态
         // （表现：建造菜单图标空、放置时空引用 / 显示成别的建筑）。
         // 早期版本把建 prefab 放在 Update 里延迟做，等它建好时 Def 早就解析完了 —— 所以一直放不下去。
-        CustomSprite.EnsurePrefab();
         CustomSprite.RegisterIcon();
+        CustomSprite.ReapplyToAll();
 
         ClassInjector.RegisterTypeInIl2Cpp<FacilityComponent>();
         var go = new GameObject("FacilityModRoot");
