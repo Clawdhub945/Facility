@@ -19,12 +19,39 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>本游戏日已经发过产的建筑 guid（防同一日重复产出；换日清空）。</summary>
     private readonly HashSet<int> _producedToday = new();
 
-    /// <summary>自动化测试热键：F8 程序化点击窗口里的「额外产品」选择条（每帧只触发一次）。</summary>
+    /// <summary>自动化测试热键：F8 程序化点击窗口里的「额外产品」下拉框（每帧只触发一次）。</summary>
     private bool _testKeyLatch;
+
+    /// <summary>自定义外观的延迟初始化开关（每帧轮询，成功后置 true 不再试）</summary>
+    private bool _customSpriteReady;
+
+    /// <summary>
+    /// 自定义外观 / 图标的**延迟初始化**：插件 Load() 时世界还没加载，
+    /// 场景里没有本 mod 的建筑当模板、`SpriteManager.Ins` 也可能还没建好，
+    /// 所以放到主线程 Update 里反复试。
+    /// ⚠ 两项**各自**重试到成功为止：早期版本用「prefab 到位 && 图标非空」当完成条件，
+    /// 结果是 prefab 成了就不再重试，而图标注册其实是失败/没生效的（菜单一直是白块）。
+    /// </summary>
+    private void PollCustomSprite()
+    {
+        if (_customSpriteReady) return;
+        try
+        {
+            bool prefabOk = CustomSprite.EnsurePrefab() != null;
+            bool iconOk = CustomSprite.RegisterIcon();
+            if (prefabOk && iconOk)
+            {
+                _customSpriteReady = true;
+                Plugin.LogV("[Facility] 自定义外观初始化完成（建筑 prefab + 菜单图标都已就绪）");
+            }
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 自定义外观初始化异常: {ex.Message}"); }
+    }
 
     private void Update()
     {
         PollTestHotkey();
+        PollCustomSprite();
 
         if (Time.time < _nextAt) return;
         _nextAt = Time.time + 1.5f;
@@ -124,15 +151,18 @@ public class FacilityComponent : MonoBehaviour
         try
         {
             var dic = D.Ins.career_dic_with_facility_id_as_key;
-            if (dic != null && dic.ContainsKey(Plugin.FacilityId))
+            foreach (int fid in Plugin.ManagedFacilityIds)
             {
-                var ci = dic[Plugin.FacilityId];
-                Plugin.LogV($"[Facility] career行: data_id={ci.data_id} limit={ci.manpower_limit} " +
-                            $"factor={ci.manpower_factor} npc_type={ci.npc_type} main={ci.is_main_facility}");
-            }
-            else
-            {
-                Plugin.LogV("[Facility] career行: 字典中无 105040！");
+                if (dic != null && dic.ContainsKey(fid))
+                {
+                    var ci = dic[fid];
+                    Plugin.LogV($"[Facility] career行 {fid}: data_id={ci.data_id} limit={ci.manpower_limit} " +
+                                $"factor={ci.manpower_factor} npc_type={ci.npc_type} main={ci.is_main_facility}");
+                }
+                else
+                {
+                    Plugin.LogV($"[Facility] career行: 字典中无 {fid}！");
+                }
             }
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] career dump 失败: {ex.Message}"); }
@@ -143,7 +173,7 @@ public class FacilityComponent : MonoBehaviour
         int built = 0;
         foreach (var f in facilities)
         {
-            if (f == null || f.stuff_id != Plugin.FacilityId) continue;
+            if (f == null || !Plugin.IsManaged(f.stuff_id)) continue;
             bool finished;
             try { finished = f.is_build_finished; }
             catch { finished = true; }
@@ -182,7 +212,7 @@ public class FacilityComponent : MonoBehaviour
                     //    （官方 Facility.RecordProduct 是唯一写入入口，见 Facility.cs:71；
                     //     窗口记录区读的就是 ProductRecordBagThisYear/LastYear）
                     try { f.RecordProduct(sid, count); }
-                    catch (Exception rex) { Plugin.LogWarning($"[Facility] 产量记账失败 guid={f.guid} 物品{sid}: {rex.Message}"); }
+                    catch (Exception rex) { Plugin.LogV($"[Facility] 产量记账失败 guid={f.guid} 物品{sid}: {rex.Message}"); }
                     Plugin.LogV($"[Facility] 生产所 guid={f.guid} 工人×{workers} → 物品{sid} +{count}");
                 }
                 catch (Exception ex)
@@ -191,7 +221,9 @@ public class FacilityComponent : MonoBehaviour
                 }
             }
         }
+        // 每天一条汇总日志默认**不输出**（用户要求安静）：
+        // 想看就打开 cfg「调试.日志详细模式」，那时才会连带输出每座建筑的明细。
         if (built > 0)
-            Plugin.LogInfo($"[Facility] 第 {dayKey} 日：{built} 座综合生产所完成产出（{products.Count} 种产品）");
+            Plugin.LogV($"[Facility] 第 {dayKey} 日：{built} 座生产所完成产出（{products.Count} 种产品）");
     }
 }

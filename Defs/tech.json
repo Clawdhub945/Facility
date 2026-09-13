@@ -5,5 +5,13 @@
     "facility_id": 105040,
     "seed_id": "",
     "event_id": ""
+  },
+  {
+    "txt_id": 300,
+    "tech_id": 0,
+    "facility_id": 105050,
+    "seed_id": "",
+    "event_id": "",
+    "tech_desc_zh-CN": "建造超级生产所：红砖厂房，产量与综合生产所一致"
   }
 ]

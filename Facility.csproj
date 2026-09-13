@@ -30,6 +30,8 @@
     <Reference Include="Il2Cppmscorlib" HintPath="$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll" />
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll" />
+    <!-- 自定义外观：运行时把 PNG 读成 Texture2D 需要 ImageConversion.LoadImage（扩展方法在 ImageConversion 类里） -->
+    <Reference Include="UnityEngine.ImageConversionModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.ImageConversionModule.dll" />
     <Reference Include="UnityEngine.UI" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.UI.dll" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.UIModule.dll" />
     <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.TextRenderingModule.dll" />

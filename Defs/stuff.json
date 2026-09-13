@@ -20,5 +20,27 @@
     "op_increase_step": 1,
     "stuff_namezh-CN": "综合生产所",
     "desczh-CN": "安排工人后每天稳定产出原木、石料等资源。人数可调，产出清单见 BepInEx/config/claude.facility.cfg。"
+  },
+  {
+    "stuff_id": 105050,
+    "price": 0,
+    "can_carry_one_by_one_anytime": 0,
+    "incineration_result": 0,
+    "spoilage_year_limit": 0,
+    "disable": 0,
+    "can_pick_up_by_ant": 0,
+    "ignore_in_summary": 0,
+    "sort_index": 0,
+    "stuff_type": 1,
+    "stuff_sub_type": 105,
+    "effect_value": 0.0,
+    "prefab": "workbench",
+    "stuff_img": "ui_105050",
+    "stuff_img_on_map": "workbench_0",
+    "weight": 1.0,
+    "reward_count_once": 0,
+    "op_increase_step": 1,
+    "stuff_namezh-CN": "超级生产所",
+    "desczh-CN": "由红砖厂房改建的大型生产设施。安排工人后每天稳定产出资源，产出清单与人数上限见 BepInEx/config/claude.facility.cfg。"
   }
 ]

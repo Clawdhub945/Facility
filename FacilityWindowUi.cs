@@ -110,7 +110,7 @@ internal static class FacilityWindowUi
         {
             if (t == null) continue;
             if (t.name == "txt_forest_coverage_rate")
-                t.text = "综合生产所：工人每日自动产出（数量可在配置调整）";
+                t.text = "生产所：工人每日自动产出（数量可在配置调整）";
             else if (t.name == "txt_tip" && !string.IsNullOrEmpty(t.text) && t.text.Contains("森林覆盖率"))
                 t.text = "工人越多，每日产出越多；点下方下拉框可选择额外产品";
         }
@@ -192,7 +192,7 @@ internal static class FacilityWindowUi
             _openListOwner = open ? bar : null;
             Plugin.LogV($"[FacilityUI] 下拉框{(open ? "展开" : "收起")}（{Plugin.ParseExtraCandidates().Count} 个候选）");
         }
-        catch (Exception ex) { Plugin.LogWarning($"[FacilityUI] 下拉框展开失败: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 下拉框展开失败: {ex.Message}"); }
     }
 
     private static GameObject? EnsureList(GameObject bar)
@@ -283,7 +283,7 @@ internal static class FacilityWindowUi
             if (bar != null) RefreshLabel(bar);
             Plugin.LogV($"[FacilityUI] 下拉框选中 {stuffId}（{CandidateName(stuffId)}）");
         }
-        catch (Exception ex) { Plugin.LogWarning($"[FacilityUI] 下拉框选中失败: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 下拉框选中失败: {ex.Message}"); }
     }
 
     // ---------- 测试钩子 ----------
@@ -308,7 +308,7 @@ internal static class FacilityWindowUi
         var es = EventSystem.current;
         if (es == null)
         {
-            Plugin.LogWarning("[FacilityUI] EventSystem.current 为空，无法派发点击");
+            Plugin.LogV("[FacilityUI] EventSystem.current 为空，无法派发点击");
             return false;
         }
         var data = new PointerEventData(es);
@@ -320,7 +320,7 @@ internal static class FacilityWindowUi
         }
         catch (Exception ex)
         {
-            Plugin.LogWarning($"[FacilityUI] 程序化点击失败: {ex.Message}");
+            Plugin.LogV($"[FacilityUI] 程序化点击失败: {ex.Message}");
             return false;
         }
     }
@@ -337,7 +337,7 @@ internal static class FacilityWindowUi
             var bar = FindLiveSelector();
             if (bar == null)
             {
-                Plugin.LogWarning("[FacilityUI] 测试点击：当前没有打开的综合生产所窗口（找不到下拉框）");
+                Plugin.LogV("[FacilityUI] 测试点击：当前没有打开的综合生产所窗口（找不到下拉框）");
                 return;
             }
             int before = Plugin.ExtraProduct;
@@ -347,12 +347,12 @@ internal static class FacilityWindowUi
             var list = FindChildByName(bar.transform.parent, DropdownListName);
             if (list == null)
             {
-                Plugin.LogWarning("[FacilityUI] 测试点击：下拉框列表没建出来");
+                Plugin.LogV("[FacilityUI] 测试点击：下拉框列表没建出来");
                 return;
             }
             if (!list.activeSelf)
             {
-                Plugin.LogWarning("[FacilityUI] 测试点击：下拉框没展开（EventTrigger/Button 未收到点击）");
+                Plugin.LogV("[FacilityUI] 测试点击：下拉框没展开（EventTrigger/Button 未收到点击）");
                 return;
             }
 
@@ -366,13 +366,13 @@ internal static class FacilityWindowUi
             var row = FindChildByName(list.transform, "Row_" + nextId);
             if (row == null)
             {
-                Plugin.LogWarning($"[FacilityUI] 测试点击：找不到候选行 Row_{nextId}");
+                Plugin.LogV($"[FacilityUI] 测试点击：找不到候选行 Row_{nextId}");
                 return;
             }
             SimulateClick(row);
 
             int after = Plugin.ExtraProduct;
-            Plugin.LogInfo($"[FacilityUI] 测试点击下拉框：额外产品 {before} -> {after}" +
+            Plugin.LogV($"[FacilityUI] 测试点击下拉框：额外产品 {before} -> {after}" +
                            (before == after ? "（未变化，请检查选项行的点击回调）" : "（已写入 cfg）"));
         }
         catch (Exception ex) { Plugin.LogError($"[FacilityUI] 测试点击异常: {ex}"); }

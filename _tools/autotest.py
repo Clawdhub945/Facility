@@ -599,6 +599,8 @@ def client_grab(hwnd, path: Path):
     p = wt.POINT(0, 0)
     user32.ClientToScreen(hwnd, ctypes.byref(p))
     w, h = client_size(hwnd)
+    if w <= 0 or h <= 0:
+        raise RuntimeError(f"游戏窗口客户区尺寸异常 ({w}x{h})——窗口可能被最小化了")
     crop = im.crop((p.x, p.y, p.x + w, p.y + h))
     crop.save(path)
     try:

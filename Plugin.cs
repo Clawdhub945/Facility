@@ -15,10 +15,29 @@ public class Plugin : BasePlugin
 {
     public const string PLUGIN_GUID = "claude.facility";
     public const string PLUGIN_NAME = "Facility";
-    public const string PLUGIN_VERSION = "1.0";
+    /// <summary>
+    /// 版本号：**每次改动都往上加**，启动横幅会打出来。
+    /// 用途：确认游戏加载的到底是哪一版 DLL —— 这个项目踩过「改了代码但游戏跑的是旧 DLL」
+    /// 的坑（日志刷屏怎么关都关不掉，就是因为在看旧版本的输出）。
+    /// </summary>
+    public const string PLUGIN_VERSION = "1.2.0-super";
 
     /// <summary>综合生产所的设施 id（Defs/stuff.json + build.json + tech.json 同步）</summary>
     public const int FacilityId = 105040;
+
+    /// <summary>超级生产所的设施 id（自定义外观，挂在自己新建的科技节点 909050 下）</summary>
+    public const int SuperFacilityId = 105050;
+
+    /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
+    public static readonly int[] ManagedFacilityIds = { FacilityId, SuperFacilityId };
+
+    /// <summary>该设施是否由本 mod 添加</summary>
+    public static bool IsManaged(int stuffId)
+    {
+        foreach (int id in ManagedFacilityIds)
+            if (id == stuffId) return true;
+        return false;
+    }
 
     internal static ManualLogSource Logger = null!;
     internal static BepInEx.Configuration.ConfigFile? ModConfigFile;
@@ -69,7 +88,7 @@ public class Plugin : BasePlugin
                     "额外产品每人每个游戏日的产出数量。",
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
 
-            LogInfo($"[Facility] 产出配置: {ProductsEntry.Value}, 最大工位数 {WorkPosMaxEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
+            LogV($"[Facility] 产出配置: {ProductsEntry.Value}, 最大工位数 {WorkPosMaxEntry.Value} (BepInEx/config/{PLUGIN_GUID}.cfg)");
         }
         catch (Exception ex) { LogError($"[Facility] 配置绑定失败: {ex}"); }
 
@@ -77,14 +96,46 @@ public class Plugin : BasePlugin
         try { Application.runInBackground = true; }
         catch (Exception ex) { LogError($"[Facility] 设置 runInBackground 失败: {ex.Message}"); }
 
-        // 工位数补丁：GetOriginalWorkPosCount → cfg「每座最大工位数」（仅 105040 生效）
+        // 工位数补丁 + 自定义外观补丁。
+        // ⚠ 这里**逐个类打补丁**并各自 try/catch，而不是一把 `PatchAll()`：
+        // 实测事故——自定义外观补丁因为找不到方法抛异常，`PatchAll()` 整条中断，
+        // 结果**工位数补丁也没挂上**（窗口 +/- 失效），而且只有一行 Error 容易看漏。
         try
         {
             _harmony = new HarmonyLib.Harmony(PLUGIN_GUID);
-            _harmony.PatchAll();
-            LogInfo("[Facility] 工位数补丁已挂：GetOriginalWorkPosCount（仅 105040）");
+            int ok = 0, fail = 0;
+            foreach (var t in new[]
+                     {
+                         typeof(FacilityGetOriginalWorkPosCountPatch),
+                         typeof(CustomPrefabPatch),
+                         typeof(FacilityWindowSetInfoPatch),
+                         typeof(FacilityWindowRefreshPatches),
+                     })
+            {
+                try
+                {
+                    _harmony.CreateClassProcessor(t).Patch();
+                    ok++;
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    LogError($"[Facility] 补丁 {t.Name} 挂载失败（其余补丁不受影响）: {ex.Message}");
+                }
+            }
+            LogBanner($"[Facility] 补丁挂载完成：成功 {ok} 个，失败 {fail} 个（工位数 / 自定义外观 / 窗口UI）");
         }
-        catch (Exception ex) { LogError($"[Facility] 挂工位数补丁失败: {ex}"); }
+        catch (Exception ex) { LogError($"[Facility] 打补丁失败: {ex}"); }
+
+        DumpPrefabManagerApi();
+        DumpSpriteManagerApi();
+
+        // ⚠ 自定义外观必须**尽早**建好：游戏的 Def 加载（`D.LoadData`）会按名字解析
+        // stuff.json 里的 prefab，那一刻要是拿不到，建筑就是「没有模型」的状态
+        // （表现：建造菜单图标空、放置时空引用 / 显示成别的建筑）。
+        // 早期版本把建 prefab 放在 Update 里延迟做，等它建好时 Def 早就解析完了 —— 所以一直放不下去。
+        CustomSprite.EnsurePrefab();
+        CustomSprite.RegisterIcon();
 
         ClassInjector.RegisterTypeInIl2Cpp<FacilityComponent>();
         var go = new GameObject("FacilityModRoot");
@@ -92,7 +143,7 @@ public class Plugin : BasePlugin
         go.hideFlags = HideFlags.HideAndDontSave;
         go.AddComponent<FacilityComponent>();
 
-        LogInfo($"{PLUGIN_NAME} v{PLUGIN_VERSION} 已加载！");
+        LogBanner($"{PLUGIN_NAME} v{PLUGIN_VERSION} 已加载！");
     }
 
     private static string _lastBadRaw = "";
@@ -136,7 +187,7 @@ public class Plugin : BasePlugin
                 string name = "";
                 foreach (var (id, nm) in ParseExtraCandidates())
                     if (id == stuffId) { name = nm; break; }
-                LogInfo($"[Facility] 额外产品 → {(stuffId == 0 ? "无" : $"{name}({stuffId})")}，下一游戏日开始产出");
+                LogV($"[Facility] 额外产品 → {(stuffId == 0 ? "无" : $"{name}({stuffId})")}，下一游戏日开始产出");
             }
         }
         catch (Exception ex) { LogError($"[Facility] 写额外产品配置失败: {ex.Message}"); }
@@ -157,7 +208,7 @@ public class Plugin : BasePlugin
                 !int.TryParse(s[(i + 1)..].Trim(), out int per) || sid <= 0 || per <= 0)
             {
                 if (raw != _lastBadRaw)
-                    LogWarning($"[Facility] 产出配置有坏段已跳过: 「{s}」（正确格式 物品id:数量）");
+                    LogV($"[Facility] 产出配置有坏段已跳过: 「{s}」（正确格式 物品id:数量）");
                 continue;
             }
             list.Add((sid, per));
@@ -166,15 +217,109 @@ public class Plugin : BasePlugin
         return list;
     }
 
-    internal static void LogInfo(string msg) => Logger.LogInfo(msg);
-    internal static void LogWarning(string msg) => Logger.LogWarning(msg);
-    internal static void LogError(string msg) => Logger.LogError(msg);
+    /// <summary>
+    /// 诊断：把 `PrefabManager` 的全部方法名打出来（详细模式）。
+    /// 用途：自定义外观要拦「按名字取 prefab」的入口，而 interop 里到底暴露了哪些方法
+    /// 只能运行时看（实测 `GetPrefab` 私有、无 C# 绑定，`AccessTools.Method` 找不到）。
+    /// </summary>
+    private static void DumpPrefabManagerApi()
+    {
+        try
+        {
+            if (VerboseEntry == null || !VerboseEntry.Value) return;
+            var sb = new System.Text.StringBuilder("[Facility] PrefabManager 方法清单:\n");
+            foreach (var m in typeof(PrefabManager).GetMethods(
+                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                         System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance |
+                         System.Reflection.BindingFlags.DeclaredOnly))
+            {
+                var ps = m.GetParameters();
+                sb.Append("  ").Append(m.IsPublic ? "public " : "nonpub ")
+                  .Append(m.IsStatic ? "static " : "inst ")
+                  .Append(m.ReturnType.Name).Append(' ').Append(m.Name).Append('(');
+                for (int i = 0; i < ps.Length; i++)
+                    sb.Append(i > 0 ? ", " : "").Append(ps[i].ParameterType.Name);
+                sb.Append(")\n");
+            }
+            LogV(sb.ToString());
+        }
+        catch (Exception ex) { LogV($"[Facility] dump PrefabManager 失败: {ex.Message}"); }
+    }
 
-    /// <summary>诊断日志：仅 cfg「调试.日志详细模式」=true 时输出</summary>
+    /// <summary>诊断：把 `SpriteManager` 的全部方法打出来（详细模式），用于核对图标补丁的目标签名</summary>
+    private static void DumpSpriteManagerApi()
+    {
+        try
+        {
+            if (VerboseEntry == null || !VerboseEntry.Value) return;
+            var sb = new System.Text.StringBuilder("[Facility] SpriteManager 方法清单:\n");
+            var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.DeclaredOnly;
+            for (var t = typeof(SpriteManager); t != null && t != typeof(object); t = t.BaseType)
+            {
+                sb.Append("  [").Append(t.Name).Append("]\n");
+                System.Reflection.MethodInfo[] ms;
+                try { ms = t.GetMethods(flags); } catch { continue; }
+                foreach (var m in ms)
+                {
+                    var ps = m.GetParameters();
+                    sb.Append("    ").Append(m.IsPublic ? "public " : "nonpub ")
+                      .Append(m.IsStatic ? "static " : "inst ")
+                      .Append(m.ReturnType.Name).Append(' ').Append(m.Name).Append('(');
+                    for (int i = 0; i < ps.Length; i++)
+                        sb.Append(i > 0 ? ", " : "").Append(ps[i].ParameterType.Name);
+                    sb.Append(")\n");
+                }
+            }
+            LogV(sb.ToString());
+        }
+        catch (Exception ex) { LogV($"[Facility] dump SpriteManager 失败: {ex.Message}"); }
+    }
+
+    // ==================== 日志 ====================
+    //
+    // 静默模式（默认）下**只输出错误**。用户明确要求：不要把换日诊断、每座建筑明细、
+    // career 行、每日汇总这些刷进日志。
+    //
+    // 实现要点（这几条都是踩过坑的）：
+    //   1. `LogV` 只认 cfg「调试.日志详细模式」，**不缓存**——每 1.5 秒的 cfg.Reload()
+    //      会刷新 ConfigEntry.Value，所以要每次读。
+    //   2. 即使 cfg 读不到 / 抛异常，也**默认静默**（catch 里直接 return），
+    //      绝不「读不到就当详细模式开」。
+    //   3. 详细模式打开时仍然有节流：同一类明细最多每 `_verboseIntervalSec` 秒一次，
+    //      避免又变成刷屏（真要全量就调大间隔或看 Player.log）。
+
+    /// <summary>上次输出明细日志的时间（节流用；详细模式下也不会刷屏）</summary>
+    private static float _lastVerboseAt;
+    private const float VerboseIntervalSec = 0.0f;   // 0 = 不节流（详细模式就全量输出）
+
+    internal static void LogError(string msg)
+    {
+        try { Logger.LogError(msg); } catch { }
+    }
+
+    /// <summary>启动横幅：每次启动各一条，方便确认 mod 到底有没有加载、加载的是哪一版</summary>
+    internal static void LogBanner(string msg)
+    {
+        try { Logger.LogInfo(msg); } catch { }
+    }
+
+    /// <summary>诊断日志：只有 cfg「调试.日志详细模式」= true 才输出；其余一律丢弃</summary>
     internal static void LogV(string msg)
     {
-        try { if (VerboseEntry != null && !VerboseEntry.Value) return; }
-        catch { }
-        Logger.LogInfo(msg);
+        bool verbose;
+        try { verbose = VerboseEntry != null && VerboseEntry.Value; }
+        catch { verbose = false; }          // 读配置失败 → 静默（绝不因此刷屏）
+        if (!verbose) return;
+
+        if (VerboseIntervalSec > 0f)
+        {
+            float now = 0f;
+            try { now = UnityEngine.Time.realtimeSinceStartup; } catch { }
+            if (now - _lastVerboseAt < VerboseIntervalSec) return;
+            _lastVerboseAt = now;
+        }
+        try { Logger.LogInfo(msg); } catch { }
     }
 }
