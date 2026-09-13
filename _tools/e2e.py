@@ -45,12 +45,24 @@ def entities():
     return json.loads(raw.decode("utf-8", "replace"))
 
 
-def scan():
+def scan(wait_extra=6.0):
+    """重扫场景实体。
+
+    ⚠ 必须做：`/api/editor/entities` 返回的是**上次扫描的缓存**，
+    读档后缓存里还是上个世界的 ptrHash（`locate` 会失败、点不到东西）。
+    实测踩坑：读档后不重扫 → 实体列表出现 8 座（新旧各 4 座，guid 重复）→ 自动化点空。
+    """
     A.api_post("/api/editor/scan", None, timeout=180)
+    time.sleep(wait_extra)          # 等主线程把分片扫描跑完、缓存刷新
 
 
 def facilities():
-    return [e for e in entities() if e.get("stuffId") == FACILITY]
+    """当前场景里的综合生产所，按 guid 去重（读档后缓存里可能新旧混杂）。"""
+    seen = {}
+    for e in entities():
+        if e.get("stuffId") == FACILITY:
+            seen.setdefault(e.get("guid"), e)
+    return list(seen.values())
 
 
 def refine_with_screenshot(img, pos, radius=90):
@@ -191,8 +203,8 @@ def main():
         check("进入最新存档", ok, f"{save} 用时 {dt:.1f}s state={st2}")
         if not ok:
             return 1
-        time.sleep(6)
-        scan()
+        time.sleep(8)
+        scan()          # 读档后必须重扫，否则拿到的是上个世界的 ptrHash
 
     st = A.api_state() or {}
     check("在存档内 (inSave)", st.get("inSave") is True, json.dumps(st, ensure_ascii=False))
