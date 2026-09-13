@@ -188,13 +188,14 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
                     "# 工人越多，每日产出越多；产出会自动入库")
 
     stuff_rows = [
+        # 综合生产所：**保持原样**（外观 = 用户选的预设，默认制造台 workbench）
         stuff_row(MOD_ID, NAME, DESC, img, img_on_map, prefab),
+        # 超级生产所：自定义外观（prefab 借用 workbench，贴图由 DLL 运行时换成我们自己的）
         stuff_row(SUPER_ID, SUPER_NAME, SUPER_DESC, SUPER_IMG, SUPER_IMG_ON_MAP, SUPER_PREFAB),
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
-        # 超级生产所：3×2（用户要求；与采集营地同尺寸，贴图也是 3×2 比例），
-        # 外观走「workbench prefab + 运行时换贴图」
+        # 超级生产所：3×2（用户要求），door_way=1234 与采集营地同款
         build_row(SUPER_ID, SUPER_PREFAB, guide_common, 3, 2, door_way=1234),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——

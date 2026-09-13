@@ -43,6 +43,9 @@ OUT = REPO / "Defs" / "Textures"
 SPRITE_PREFIX = "super_factory"     # 4 个朝向：super_factory_0..3
 ICON_PNG = "ui_105050.png"
 
+# 原图是按 32 像素/格画的，游戏要 64 像素/格 → 统一放大 2 倍
+TEXTURE_UPSCALE = 2
+
 # ---------------- 调色板（像素风，刻意压住颜色数量） ----------------
 BRICK = (150, 62, 48)          # 红砖主体
 BRICK_D = (118, 46, 36)        # 砖缝/暗部
@@ -210,14 +213,22 @@ def main():
     if not src.exists():
         raise SystemExit(f"缺少素材目录 {src}（放 4 张 3×2 建筑图：1_0..1_3.png）")
 
-    # 用户提供的 4 张图 = 建筑的 4 个朝向（1_0..1_3）。直接拷成游戏要的名字。
+    # 用户提供的 4 张图 = 建筑的 4 个朝向（1_0..1_3）。
+    #
+    # ⚠ 必须放大 2 倍：游戏是 **64 像素/格**（官方教程里 3×3 建筑示例 = 192×192）。
+    # 用户的图是 32 像素/格画的（横向 96×73、竖向 64×118），
+    # 直接用的话 3×2 的建筑只画出 1.5×1.1 格 —— 用户实测反馈「贴图大小只有 1.5×1」就是这个原因。
+    # 放大到 192×146（3×64 × 2×64 再按原图比例）后，用 ppu=64 正好铺满 3×2 占地格。
+    # 用 NEAREST 放大保住像素风的硬边，不要用 LANCZOS（会糊）。
     for i in range(4):
         s = src / f"1_{i}.png"
         if not s.exists():
             raise SystemExit(f"缺少素材 {s}")
-        Image.open(s).save(OUT / f"{SPRITE_PREFIX}_{i}.png")
-        print(f"生成: {SPRITE_PREFIX}_{i}.png ← img/1_{i}.png")
-    Image.open(src / "1_0.png").resize((64, 64), Image.LANCZOS).save(OUT / ICON_PNG)
+        im = Image.open(s).convert('RGBA')
+        im2 = im.resize((im.width * TEXTURE_UPSCALE, im.height * TEXTURE_UPSCALE), Image.NEAREST)
+        im2.save(OUT / f"{SPRITE_PREFIX}_{i}.png")
+        print(f"生成: {SPRITE_PREFIX}_{i}.png ← img/1_{i}.png  {im.size} → {im2.size}（放大 {TEXTURE_UPSCALE}×）")
+    Image.open(src / "1_0.png").convert("RGBA").resize((64, 64), Image.LANCZOS).save(OUT / ICON_PNG)
     print(f"生成: {ICON_PNG} ← img/1_0.png（缩到 64×64 当菜单图标）")
 
     # ⚠ 必须 action="add"：我们的贴图名游戏本来没有，add 才是「新增图片」。
