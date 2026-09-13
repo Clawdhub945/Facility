@@ -45,7 +45,11 @@ SUPER_DESC = ("由红砖厂房改建的大型生产设施。安排工人后每�
 #   克隆 workbench prefab 换图 → Harmony 拦 PrefabManager.GetPrefab 返回克隆）。
 # 试过的两条官方贴图通道都不行：action="add" 会 NullReferenceException，
 # action="replace" 洋红探针实测不生效（详见 make_textures.py 顶部注释）。
-SUPER_PREFAB = "workbench"
+# ⚠ **必须用原生 3×2 的 prefab**：workbench（制造台）是 **3×1** 的，
+# 拿它当 3×2 建筑的基础会导致「模型只画 1×3、占地却是 3×2」（用户实测反馈）。
+# gatherers_hut（采集营地）原生就是 3×2、class_name 也是 FacilityGatherersHut、
+# 同样有工人系统 —— 和超级生产所完全同款，是最合适的骨架。
+SUPER_PREFAB = "gatherers_hut"
 SUPER_IMG = f"ui_{SUPER_ID}"           # 自定义 UI 图标名（DLL 用 SpriteManager.AddSpriteToDic 注册，实测有效）
 SUPER_IMG_ON_MAP = "super_factory_0"     # 场景贴图：我们自己新增的（textures.xml action="add"），\u65b9\u5411 0
 # 科技：mod 通道加不了新科技树（tech_tree.json 不被读取），按用户要求**取消科技门槛**

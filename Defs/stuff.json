@@ -34,7 +34,7 @@
     "stuff_type": 1,
     "stuff_sub_type": 105,
     "effect_value": 0.0,
-    "prefab": "workbench",
+    "prefab": "gatherers_hut",
     "stuff_img": "ui_105050",
     "stuff_img_on_map": "super_factory_0",
     "weight": 1.0,
