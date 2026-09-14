@@ -458,7 +458,24 @@ internal static class CustomSprite
             var alive = new HashSet<int>();
             foreach (var f in all)
             {
-                if (f == null || f.stuff_id != TargetStuffId) continue;
+                if (f == null) continue;
+                // ⚠ 除了我们的建筑本体，**移动设施时的预览体**也要一起修：
+                // 用户实测「移动过程中显示的是原外观，放下后才正常」——
+                // 预览体是游戏另建的对象，可能 stuff_id 也是 105050（只是没造完），
+                // 也可能带着我们的名字但不是同一个 guid。这里放宽为：
+                //   本建筑(105050) 或 「名字里带我们外观名」
+                bool isOurs = false;
+                try { isOurs = f.stuff_id == TargetStuffId; } catch { }
+                if (!isOurs)
+                {
+                    try
+                    {
+                        var goName = f.gameObject.name ?? "";
+                        isOurs = goName.Contains(SpriteNamePrefix) || goName.Contains(OwnRendererName);
+                    }
+                    catch { }
+                }
+                if (!isOurs) continue;
                 int g = 0;
                 try { g = f.guid; } catch { }
                 if (g != 0) alive.Add(g);
@@ -486,13 +503,14 @@ internal static class CustomSprite
 
     /// <summary>
     /// 请求「稍后强制补一次外观」：移动设施等流程里对象状态还在变，
-    /// 由主线程循环在下一帧统一补（`FacilityComponent` 每帧都会调 `ReapplyToAll`，
-    /// 这里只是把标记置上，方便日志与将来做优先级）。
+    /// 由主线程循环下一帧统一补（`FacilityComponent.Update` 每帧都会调 `ReapplyToAll`）。
+    ///
+    /// ⚠ **不要**改成去挂 `Facility.DoAfterMoveFacility` 之类的游戏业务方法 ——
+    /// 实测那样会踩 IL2CPP 内存保护、**直接崩游戏**：
+    /// `Fatal error. System.AccessViolationException ... il2cpp_object_get_class`。
+    /// 跨帧的对象操作一律只在主线程循环里做。
     /// </summary>
-    internal static void RequestReapplySoon()
-    {
-        _forceNext = true;
-    }
+    internal static void RequestReapplySoon() => _forceNext = true;
 
     private static bool _forceNext;
     internal static bool ConsumeForceFlag()
@@ -500,6 +518,38 @@ internal static class CustomSprite
         bool f = _forceNext;
         _forceNext = false;
         return f;
+    }
+
+    /// <summary>
+    /// 详细模式诊断：列出场景里**所有**设施（含移动预览体）的关键信息。
+    /// 用途：认出「移动设施时跟随光标、显示原模型的那个预览对象」到底是什么
+    /// （用户反馈：移动**过程中**是原外观，放下后正常）。
+    /// </summary>
+    internal static void DumpAllFacilities(string tag)
+    {
+        try
+        {
+            if (Plugin.VerboseEntry?.Value != true) return;
+            var all = UnityEngine.Object.FindObjectsOfType<Facility>();
+            if (all == null) return;
+            var sb = new System.Text.StringBuilder($"[Facility] 设施清单（{tag}，共 {all.Length} 个）:\n");
+            foreach (var f in all)
+            {
+                if (f == null) continue;
+                int sid = 0, guid = 0, workers = 0;
+                bool finished = false;
+                string parent = "?";
+                try { sid = f.stuff_id; } catch { }
+                try { guid = f.guid; } catch { }
+                try { finished = f.is_build_finished; } catch { }
+                try { workers = f.npc_list?.Count ?? 0; } catch { }
+                try { parent = f.transform.parent != null ? f.transform.parent.name : "(root)"; } catch { }
+                sb.Append($"  sid={sid} guid={guid} go={f.gameObject.name} parent={parent} ")
+                  .Append($"finished={finished} workers={workers} active={f.gameObject.activeInHierarchy}\n");
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 设施清单失败: {ex.Message}"); }
     }
 }
 

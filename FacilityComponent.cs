@@ -42,10 +42,15 @@ public class FacilityComponent : MonoBehaviour
                 if (CustomSprite.RegisterIcon() && CustomSprite.IconSprite != null)
                     _customSpriteReady = true;
             }
-            // 补外观：**不能只在初始化时做一次** —— 读档/新造的建筑都要补，
+            // 补外观：**不能只在初始化时做一次** —— 读档/新造/移动的建筑都要补，
             // 所以每帧都扫一遍（FindObjectsOfType 很便宜，建筑数量也就几座）。
             // 早期版本把它放在 _customSpriteReady 判断里，导致读档后已存在的建筑漏掉换图。
             CustomSprite.ReapplyToAll();
+
+            // 被「移动设施」等流程要求强制补一次时，顺带打一份设施清单（详细模式），
+            // 用来认出「移动过程中跟随光标的预览体」是什么对象。
+            if (CustomSprite.ConsumeForceFlag())
+                CustomSprite.DumpAllFacilities("移动/强制补外观");
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 自定义外观轮询异常: {ex.Message}"); }
     }
