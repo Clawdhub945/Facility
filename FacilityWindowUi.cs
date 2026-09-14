@@ -22,9 +22,23 @@ internal static class FacilityWindowUi
 {
     private const string SelectorName = "FacilityExtraProductSelector";
     private const string DropdownListName = "FacilityExtraProductDropdown";
+
+    // ---- 尺寸 ----
+    // ⚠ 只改这几个常量是**安全**的；但**不要**在这里新增/删除 GameObject 或改层级
+    // （`SetAsFirstSibling` 之类）——踩过坑：加「描边」子物体那版直接让游戏在进档后静默退出，
+    // 连 ErrorLog 都没写。样式尽量用「改颜色/改尺寸」这种低风险手段。
     private const float RowHeight = 24f;
-    private const float BarHeight = 28f;
-    private const float BarWidth = 240f;
+    private const float BarHeight = 26f;
+    /// <summary>标题条宽度。用户反馈「下拉框超出太长了」——收窄到与窗口内产品行相当。</summary>
+    private const float BarWidth = 340f;
+
+    // 文字色：游戏 UI 的暖白（原来用 0.92/0.90/0.86 偏冷）
+    private static readonly Color TextColor = new Color(0.92f, 0.88f, 0.78f, 1f);
+    // 行底色/当前项高亮：沿用原来已验证可用的值，只微调更贴近游戏面板
+    private static readonly Color RowColor = new Color(0.22f, 0.21f, 0.19f, 1f);
+    private static readonly Color RowCurColor = new Color(0.34f, 0.31f, 0.24f, 1f);
+    private static readonly Color PanelColor = new Color(0.18f, 0.17f, 0.15f, 0.97f);
+    private static readonly Color ListColor = new Color(0.13f, 0.12f, 0.11f, 0.99f);
 
     private static Font? _font;
 
@@ -67,10 +81,6 @@ internal static class FacilityWindowUi
         }
     }
 
-    private static readonly Color BarColor = new Color(0.18f, 0.17f, 0.15f, 0.97f);
-    private static readonly Color ListColor = new Color(0.13f, 0.12f, 0.11f, 0.99f);
-    private static readonly Color RowColor = new Color(0.22f, 0.21f, 0.19f, 1f);
-    private static readonly Color RowHover = new Color(0.34f, 0.31f, 0.24f, 1f);
 
     /// <summary>窗口每次打开/刷新后调用：确保下拉框存在并就位，改写文案。</summary>
     internal static void Apply(GameObject window)
@@ -304,7 +314,7 @@ internal static class FacilityWindowUi
         go.transform.SetParent(window.transform, false);
         go.AddComponent<RectTransform>();
         var img = go.AddComponent<Image>();
-        img.color = BarColor;
+        img.color = PanelColor;
 
         var label = CreateText(go.transform, "Label", UiFont, 14, TextAnchor.MiddleLeft);
         var lr = label.rectTransform;
@@ -394,7 +404,7 @@ internal static class FacilityWindowUi
             y -= RowHeight;
 
             var rimg = row.AddComponent<Image>();
-            rimg.color = id == current ? RowHover : RowColor;
+            rimg.color = id == current ? RowCurColor : RowColor;
 
             string text = id == current ? "● " + nm : "　 " + nm;
             var label = CreateText(row.transform, "Label", UiFont, 13, TextAnchor.MiddleLeft);
@@ -564,7 +574,7 @@ internal static class FacilityWindowUi
         var t = go.AddComponent<Text>();
         if (font != null) t.font = font;
         t.fontSize = size;
-        t.color = new Color(0.92f, 0.90f, 0.86f, 1f);
+        t.color = TextColor;
         t.alignment = anchor;
         t.raycastTarget = false;   // 不挡点击，让 Button/EventTrigger 收到
         return t;
