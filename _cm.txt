@@ -1,0 +1,24 @@
+修复崩溃：移除移动设施补丁（会 AccessViolation 崩游戏）+ 保留窗口 11 方法补丁
+
+## 严重踩坑：不要在移动设施流程里做对象操作
+上一版挂了 Facility.DoAfterMoveFacility 的 Postfix，结果游戏直接崩溃：
+  Fatal error. System.AccessViolationException: Attempted to read or write protected memory.
+    at Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(IntPtr)
+    at DynamicClass.(il2cpp -> managed) DoAfterMoveFacility(...)
+在移动流程内部访问/枚举 IL2CPP 对象会踩内存保护。已移除该补丁。
+
+结论/规矩：跨帧的对象操作一律放在主线程循环里（本项目是 FacilityComponent.Update
+-> ReapplyToAll，每帧状态校验），不要挂到游戏自己的业务方法上去做重活。
+移动后的外观恢复走每帧校验这条路（在游戏逻辑之外，实测安全）。
+
+## 保留的修复：窗口补丁扩到 11 个方法
+FacilityWindowPatches 改成「按名字枚举窗口类 x 方法名」挂载，实测覆盖：
+  WindowGatherersHut.SetInfo/1, .UpdateState/0, .ShowWindowTip/0,
+  WindowWorkFacility.Refresh/0, .SetInfo/1, .ShowWindowTip/0,
+  WindowWorkFacilityWithStockAdjust.SetInfo/1, .ShowWindowTip/0,
+  WindowWorkshop.SetInfo/1, .ShowWindowTip/0, .Refresh/0
+之前只写死 WindowGatherersHut.SetInfo -> 只挂上 1 个方法，所以基类/派生类窗口
+（用户实际用的那个）没有下拉框、UI 不对。
+
+## 现状
+补丁挂载完成：成功 3 个，失败 0 个（工位数 / 自定义外观 / 窗口UI）；游戏运行正常。
