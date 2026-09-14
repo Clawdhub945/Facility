@@ -43,8 +43,11 @@ OUT = REPO / "Defs" / "Textures"
 SPRITE_PREFIX = "super_factory"     # 4 个朝向：super_factory_0..3
 ICON_PNG = "ui_105050.png"
 
-# 原图是按 32 像素/格画的，游戏要 64 像素/格 → 统一放大 2 倍
-TEXTURE_UPSCALE = 2
+# ⚠ 不要放大！游戏建筑贴图是 **32 像素/格**（实测游戏常量
+# Tile.CELL_SIZE_IN_PIXEL=32 / Tile.CELL_SIZE=1），
+# 而用户的素材本来就是按 32 像素/格画的（横向 96px = 3 格、73px ≈ 2 格）。
+# 早期版本误以为游戏是 64 像素/格，把图放大了 2 倍，结果模型比占地大一圈。
+TEXTURE_UPSCALE = 1
 
 # ---------------- 调色板（像素风，刻意压住颜色数量） ----------------
 BRICK = (150, 62, 48)          # 红砖主体

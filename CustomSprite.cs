@@ -137,26 +137,46 @@ internal static class CustomSprite
     }
 
     /// <summary>
-    /// ppu 决定模型在世界里的物理大小，必须跟游戏建筑贴图一致。
-    /// 实测取不到游戏原图的 ppu（`SpriteManager.Get("workbench_0")` 返回 null），
-    /// 所以用**推算值 64**：游戏一格 = 64 像素（官方 mod 教程里 3×3 建筑示例
-    /// `kingdom_treasure_box_0.png` = 192×192 = 3×64），建筑图 ppu 就等于每格像素数。
-    /// 如果进游戏发现模型比占地格大/小，就调这个值（大→调大，小→调小）。
+    /// ppu 决定模型在世界里的物理大小。**正确值 = 每格像素 / 每格世界单位**，
+    /// 即 `Tile.CELL_SIZE_IN_PIXEL / Tile.CELL_SIZE` —— 这两个都是游戏自己的常量，
+    /// 读出来直接算就行，不用猜（之前几轮把 ppu 猜来猜去，就是因为没找到它们）。
+    /// 读不到时退回 64（官方教程里 3×3 建筑图 192×192 反推出来的每格像素数）。
     /// </summary>
-    private const float DefaultPixelsPerUnit = 64f;
+    private const float FallbackPixelsPerUnit = 64f;
 
     private static float BasePixelsPerUnit()
     {
+        // ① 首选：用游戏常量算 ppu = 每格像素 / 每格世界单位
+        try
+        {
+            int cellPx = Tile.CELL_SIZE_IN_PIXEL;
+            float cellUnit = Tile.CELL_SIZE;
+            if (cellPx > 0 && cellUnit > 0.01f)
+            {
+                float ppu = cellPx / cellUnit;
+                Plugin.LogV($"[Facility] ppu 用游戏常量算：CELL_SIZE_IN_PIXEL={cellPx} ÷ " +
+                            $"CELL_SIZE={cellUnit} = {ppu}");
+                return ppu;
+            }
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 读 Tile.CELL_SIZE 失败: {ex.Message}"); }
+
+        // ② 退一步：借一张游戏自己的建筑图，抄它的 ppu
         foreach (var name in new[] { "workbench_0", "gatherers_hut_0", "mine_0" })
         {
             try
             {
                 var s = SpriteManager.Get(name);
-                if (s != null && s.pixelsPerUnit > 1f) return s.pixelsPerUnit;
+                if (s != null && s.pixelsPerUnit > 1f)
+                {
+                    Plugin.LogV($"[Facility] ppu 抄自游戏贴图 {name} = {s.pixelsPerUnit}");
+                    return s.pixelsPerUnit;
+                }
             }
             catch { }
         }
-        return DefaultPixelsPerUnit;
+        Plugin.LogV($"[Facility] ppu 取默认值 {FallbackPixelsPerUnit}");
+        return FallbackPixelsPerUnit;
     }
 
     private static void EnsureSprites()
