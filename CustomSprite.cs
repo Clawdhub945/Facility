@@ -439,7 +439,15 @@ internal static class CustomSprite
         return string.Join("/", parts);
     }
 
-    /// <summary>给「所有已存在的」超级生产所补一次外观（读档/热重载后用）</summary>
+    /// <summary>
+    /// 给「所有已存在的」超级生产所保持外观（读档 / 移动设施 / 游戏重建建筑之后都要）。
+    ///
+    /// ⚠ 关键：**不能靠 `_applied` 缓存来判断「做过没有」**。
+    /// 移动设施（`Facility.MoveFacility` / `DoAfterMoveFacility`）与读档重建
+    /// 都会重新挂模型，`body/sp` 与我们的自建渲染器都可能被重建，
+    /// 缓存里明明有记录、外观却已经变回原图（用户实测：移动后又变回采集营地）。
+    /// 所以这里**每帧都对每座建筑做一次状态校验**，按「实际状态」而不是「历史记录」来决定要不要修。
+    /// </summary>
     internal static void ReapplyToAll()
     {
         try
@@ -447,16 +455,34 @@ internal static class CustomSprite
             var all = UnityEngine.Object.FindObjectsOfType<Facility>();
             if (all == null) return;
             int n = 0;
+            var alive = new HashSet<int>();
             foreach (var f in all)
             {
                 if (f == null || f.stuff_id != TargetStuffId) continue;
-                ApplyAppearance(f, 0);
+                int g = 0;
+                try { g = f.guid; } catch { }
+                if (g != 0) alive.Add(g);
+                // 朝向：拿建筑自己的 rotation（移动/旋转后要对上用哪张图）
+                int rot = 0;
+                try { rot = f.rotation; } catch { }
+                ApplyAppearance(f, rot);
                 n++;
             }
-            if (n > 0) Plugin.LogV($"[Facility] 已给 {n} 座已存在的超级生产所补上外观");
+            // 清掉已经不在场景里的记录（拆除 / 换档后残留）
+            if (_applied.Count > 0)
+            {
+                var gone = new List<int>();
+                foreach (var k in _applied.Keys)
+                    if (!alive.Contains(k)) gone.Add(k);
+                foreach (var k in gone) _applied.Remove(k);
+            }
+            _lastReapplyCount = n;
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 补外观失败: {ex.Message}"); }
     }
+
+    /// <summary>上次校验时场景里的超级生产所数量（用于日志节流）</summary>
+    private static int _lastReapplyCount = -1;
 }
 
 /// <summary>
