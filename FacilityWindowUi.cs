@@ -109,7 +109,18 @@ internal static class FacilityWindowUi
         barRt.anchorMax = srcRt.anchorMax;
         barRt.pivot = srcRt.pivot;
         barRt.anchoredPosition = srcRt.anchoredPosition + new Vector2(0, -32f);
-        barRt.sizeDelta = new Vector2(BarWidth, BarHeight);
+
+        // ⚠ 宽度**不要写死**：锚点是从 `txt_forest_coverage_rate` 抄来的，
+        // 如果那对锚点会横向拉伸（anchorMin.x=0 / anchorMax.x=1），
+        // `sizeDelta.x` 就只是「相对父容器的增量」而不是实际宽度 ——
+        // 这正是反复改 BarWidth 却始终「超出窗口」的原因。
+        // 正确做法：把锚点收回成一个点，宽度取**窗口内容区的实际宽度**。
+        barRt.anchorMin = new Vector2(srcRt.anchorMin.x, srcRt.anchorMin.y);
+        barRt.anchorMax = new Vector2(srcRt.anchorMin.x, srcRt.anchorMin.y);
+        float contentW = ContentWidth(window, srcRt);
+        barRt.sizeDelta = new Vector2(contentW, BarHeight);
+        Plugin.LogV($"[FacilityUI] 下拉框宽度算法：content_area/参照文本 → {contentW:0}px" +
+                    $"（原来写死 {BarWidth}，锚点拉伸时那个值不是实际宽度）");
 
         // 让候选列表**每帧跟随**标题条（窗口被拖动/换位置后列表会飘走，
         // 早期版本只在展开那一刻算一次位置，所以「打开后下拉框不正确」）。
@@ -564,6 +575,33 @@ internal static class FacilityWindowUi
             if (c != null && c.name == name) return c;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 取「窗口内容区」的实际宽度（用于把下拉框做成和游戏内控件同宽）。
+    ///
+    /// 顺序：容器 `content_area` → 参照文本 `txt_forest_coverage_rate` 的 rect 宽 → 兜底 BarWidth。
+    /// 关键：都用 `rect.width`（锚点拉伸后的**真实像素宽**），
+    /// 而不是 `sizeDelta`（那只是「相对父容器的增量」，写死了也没用）。
+    /// </summary>
+    private static float ContentWidth(GameObject window, RectTransform? fallback)
+    {
+        try
+        {
+            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t.name != "content_area") continue;
+                var rt = t.GetComponent<RectTransform>();
+                if (rt != null && rt.rect.width > 50f) return rt.rect.width;
+            }
+        }
+        catch { }
+        try
+        {
+            if (fallback != null && fallback.rect.width > 50f) return fallback.rect.width;
+        }
+        catch { }
+        return BarWidth;
     }
 
     private static Text CreateText(Transform parent, string name, Font? font, int size, TextAnchor anchor)
