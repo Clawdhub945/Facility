@@ -76,6 +76,12 @@ internal static class FacilityWindowUi
     internal static void Apply(GameObject window)
     {
         if (window == null) return;
+
+        // 归属判断：只给「本 mod 的设施」改窗口。
+        // 采集营地(105006) 等原版设施用的是同一个窗口预制体，不判归属会把它们的窗口也改掉
+        // （用户实测反馈「点建造开后里面的部分 UI 不对」时，很可能就是别的设施窗口被我们动过）。
+        if (!IsOurWindow(window)) return;
+
         RewriteTexts(window);
         var coverage = FindText(window, "txt_forest_coverage_rate");
         if (coverage == null) return;
@@ -95,12 +101,80 @@ internal static class FacilityWindowUi
         barRt.anchoredPosition = srcRt.anchoredPosition + new Vector2(0, -32f);
         barRt.sizeDelta = new Vector2(BarWidth, BarHeight);
 
+        // 让候选列表**每帧跟随**标题条（窗口被拖动/换位置后列表会飘走，
+        // 早期版本只在展开那一刻算一次位置，所以「打开后下拉框不正确」）。
+        SyncListPosition(window, bar);
+
         // 换了窗口就把上一个展开的列表收起来（避免两个窗口的列表同时飘着）
         if (_openListOwner != null && _openListOwner != bar && IsListOpen(bar) == false)
             CloseList(FindOwnerOf(_openListOwner));
 
         LogSelectorScreenPos(bar);
     }
+
+    /// <summary>
+    /// 这个窗口是不是绑在本 mod 的设施上。
+    /// 先看窗口上的 `stuff_id` / `facility_guid` 字段（interop 里确实有这两个字段），
+    /// 拿不到字段就退一步：看本 mod 建筑里有没有 guid 与之匹配的。
+    /// </summary>
+    private static bool IsOurWindow(GameObject window)
+    {
+        try
+        {
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                var t = c.GetType();
+                // stuff_id 直接可读时最省事
+                var pi = t.GetProperty("stuff_id");
+                if (pi != null)
+                {
+                    try
+                    {
+                        var v = pi.GetValue(c);
+                        if (v is int sid && sid != 0) return Plugin.IsManaged(sid);
+                    }
+                    catch { }
+                }
+                var fi = t.GetField("stuff_id");
+                if (fi != null)
+                {
+                    try
+                    {
+                        var v = fi.GetValue(c);
+                        if (v is int sid2 && sid2 != 0) return Plugin.IsManaged(sid2);
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+        // 字段都拿不到就**放行**（宁可多改，也别让我们的窗口没下拉框）
+        return true;
+    }
+
+    /// <summary>把候选列表的位置/尺寸对齐到当前标题条（每帧调用，防止窗口移动后列表飘走）</summary>
+    private static void SyncListPosition(GameObject window, GameObject bar)
+    {
+        try
+        {
+            var list = FindChildByName(bar.transform.parent, DropdownListName);
+            if (list == null) return;
+            var listRt = list.GetComponent<RectTransform>();
+            var barRt = bar.GetComponent<RectTransform>();
+            if (listRt == null || barRt == null) return;
+            listRt.anchorMin = barRt.anchorMin;
+            listRt.anchorMax = barRt.anchorMax;
+            listRt.pivot = new Vector2(barRt.pivot.x, 1f);
+            listRt.anchoredPosition = barRt.anchoredPosition + new Vector2(0, -BarHeight - 1f);
+            listRt.sizeDelta = new Vector2(BarWidth, RowHeight * Math.Max(2, CountCandidates()) + 4f);
+            list.transform.SetAsLastSibling();
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 同步列表位置失败: {ex.Message}"); }
+    }
+
+    /// <summary>候选数量（含「无」那一项）</summary>
+    private static int CountCandidates() => 1 + Plugin.ParseExtraCandidates().Count;
 
     // ---------- 文案改写 ----------
 
