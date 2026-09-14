@@ -22,6 +22,9 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>自动化测试热键：F8 程序化点击窗口里的「额外产品」下拉框（每帧只触发一次）。</summary>
     private bool _testKeyLatch;
 
+    /// <summary>F10 = 打开建筑窗口（无人值守测试用）</summary>
+    private bool _openKeyLatch;
+
     /// <summary>预制体清单只打一次（找游戏自带 UI 预制体用）</summary>
     private bool _dumpedPrefabs;
 
@@ -130,6 +133,12 @@ public class FacilityComponent : MonoBehaviour
             bool down = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F8);
             if (down && !_testKeyLatch) FacilityWindowUi.TestClickSelector();
             _testKeyLatch = down;
+
+            // F10 = 打开本 mod 建筑的窗口。加它的理由：无人值守测试里 OS 级鼠标点击
+            // 的坐标标定太脆（分辨率会变），而「验证原生下拉」必须先有窗口。
+            bool down10 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F10);
+            if (down10 && !_openKeyLatch) FacilityWindowUi.TestOpenWindow();
+            _openKeyLatch = down10;
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 测试热键轮询失败: {ex.Message}"); }
     }

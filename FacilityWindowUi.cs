@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Il2CppInterop.Runtime;
+using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -91,6 +92,20 @@ internal static class FacilityWindowUi
         // 采集营地(105006) 等原版设施用的是同一个窗口预制体，不判归属会把它们的窗口也改掉
         // （用户实测反馈「点建造开后里面的部分 UI 不对」时，很可能就是别的设施窗口被我们动过）。
         if (!IsOurWindow(window)) return;
+
+        // 原生下拉：填我们的额外产品候选（window_blacksmith 的 dp_blueprint）
+        NativeDropdown.Refresh(window);
+
+        // 隐藏制造台专有、对我们没意义的控件（配方/材料/自动制作/制作进度）
+        // 名单来自 UnityExplorer 层级快照 + 反编译字段名
+        // ⚠ 名单会随窗口预制体不同而变化；新增建筑时在这里加对应字段名即可。
+        NativeUi.HideAll(window,
+            "formula_item_main", "formula_item_alternative",
+            "auto_make_product_of_materials", "material_settings",
+            "material_settings_grid", "tmp_product",
+            "res_grid", "my_progress_make",
+            "num_adjust_of_materials_access_range",   // 制造台的「材料取用范围」
+            "material_settings_panel", "btn_add_alternative");
 
         RewriteTexts(window);
         var coverage = FindText(window, "txt_forest_coverage_rate");
@@ -491,11 +506,128 @@ internal static class FacilityWindowUi
     }
 
     /// <summary>
-    /// 自动化测试钩子（F8）：展开下拉框 → 选下一项 → 收起。
-    /// 用途：验证「下拉框 → 写 cfg」这条链路，不依赖 OS 鼠标坐标标定。
+    /// 自动化测试钩子（F8）：操作**原生下拉** —— 读当前值 → 选下一项 → 校验 cfg 被写入。
+    ///
+    /// 用途：验证「原生下拉 → 写 cfg」这条链路，不依赖 OS 鼠标坐标标定。
     /// 详细模式关闭时也生效。日志格式不要改，`_tools/e2e.py` 会解析。
+    ///
+    /// 注：早期版本点的是自绘控件（`FacilityExtraProductSelector`），
+    /// 改成原生 `dp_blueprint` 后那套已不再使用。
     /// </summary>
     internal static void TestClickSelector()
+    {
+        try
+        {
+            var win = FindLiveWindow();
+            if (win == null)
+            {
+                Plugin.LogV("[FacilityUI] 测试点击：当前没有打开的生产所窗口");
+                return;
+            }
+            var dd = NativeUi.Find<TMPro.TMP_Dropdown>(win, "dp_blueprint");
+            if (dd == null)
+            {
+                Plugin.LogV("[FacilityUI] 测试点击：窗口里没有原生下拉 dp_blueprint");
+                return;
+            }
+
+            int before = Plugin.ExtraProduct;
+            int count = 0;
+            try { count = dd.options.Count; } catch { }
+            if (count <= 1)
+            {
+                Plugin.LogV($"[FacilityUI] 测试点击：下拉只有 {count} 项（候选没填进去？）");
+                return;
+            }
+
+            int cur = 0;
+            try { cur = dd.value; } catch { }
+            int next = (cur + 1) % count;
+            Plugin.LogV($"[FacilityUI] 原生下拉：共 {count} 项，当前 {cur}，切到 {next}");
+
+            // 走标准 API（等价于玩家点选），会触发 onValueChanged → 写 cfg
+            dd.value = next;
+            dd.RefreshShownValue();
+
+            int after = Plugin.ExtraProduct;
+            if (after != before)
+                Plugin.LogV($"[FacilityUI] 下拉选中 {next}（无={0}）→ 额外产品 {before} → {after}  [OK]");
+            else
+                Plugin.LogV($"[FacilityUI] 下拉选中 {next}，但额外产品没变（仍是 {after}）—— 回调没接上？");
+            return;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogV($"[FacilityUI] 测试点击失败: {ex.Message}");
+            return;
+        }
+    }
+
+    /// <summary>找当前打开着的、属于本 mod 设施的窗口</summary>
+    private static GameObject? FindLiveWindow()
+    {
+        try
+        {
+            foreach (var w in UnityEngine.Object.FindObjectsOfType<WindowWorkFacility>())
+            {
+                if (w == null) continue;
+                var go = w.gameObject;
+                if (!go.activeInHierarchy) continue;
+                if (NativeUi.Find<TMPro.TMP_Dropdown>(go, "dp_blueprint") == null) continue;
+                return go;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// 自动化测试钩子（F10）：打开本 mod 建筑的窗口。
+    /// 用途：无人值守测试里 OS 级鼠标点击标定很脆（分辨率会变），
+    /// 直接调游戏的选建筑逻辑最稳 —— 有了窗口才能验证原生下拉。
+    /// </summary>
+    internal static void TestOpenWindow()
+    {
+        try
+        {
+            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            {
+                if (f == null) continue;
+                int sid = 0;
+                try { sid = f.stuff_id; } catch { }
+                if (!Plugin.IsManaged(sid)) continue;
+
+                // 游戏选建筑的入口在 Facility 的点击逻辑里，名字见反编译：
+                // Item3dClickable 派生类都有 OnClick/ShowWindow 之类；这里用最通用的
+                // 「选中 + 打开窗口」组合，逐个试，成功即返回。
+                Plugin.LogV($"[FacilityUI] F10 打开窗口尝试：guid={(SafeGuid(f))} sid={sid}");
+                try
+                {
+                    var m = AccessTools.Method(f.GetType(), "ShowWindow")
+                            ?? AccessTools.Method(f.GetType(), "OpenWindow")
+                            ?? AccessTools.Method(f.GetType(), "OnClick")
+                            ?? AccessTools.Method(f.GetType(), "OnSelected");
+                    if (m != null && m.GetParameters().Length == 0)
+                    {
+                        m.Invoke(f, null);
+                        Plugin.LogV($"[FacilityUI] F10 调用 {m.Name}() 成功");
+                        return;
+                    }
+                }
+                catch (Exception ex) { Plugin.LogV($"[FacilityUI] F10 调用异常: {ex.Message}"); }
+            }
+            Plugin.LogV("[FacilityUI] F10：没找到可调用开窗方法的建筑");
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] F10 失败: {ex.Message}"); }
+    }
+
+    private static int SafeGuid(Facility f)
+    {
+        try { return f.guid; } catch { return 0; }
+    }
+
+    /// <summary>旧的自绘选择条路径（保留编译，实际不再使用）</summary>
+    private static void TestClickSelectorLegacy()
     {
         try
         {

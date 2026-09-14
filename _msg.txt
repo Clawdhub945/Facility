@@ -1,0 +1,57 @@
+突破：自定义建筑用上游戏**原生**下拉（window_prefab 换窗口方案）
+
+## 用户目标（本轮明确）
+「我要的是后续可以更多操作，我后续还要加更多建造，定制各类 UI，现在能解决就全解决了」
+→ 所以这一轮不是修一次样式，而是**定下可复用的框架**。
+
+## 关键结论（受控实验得出）
+**建筑的窗口外观由 build.json 的 `window_prefab` 决定，和 `class_name` 可以不一致。**
+
+实验 1：把 105050 的 `window_prefab` 从 `window_gatherers_hut` 换成 `window_blacksmith`
+（`class_name` 保持 `FacilityGatherersHut` 不变）：
+  * 游戏**不崩溃**、进档正常、进程稳定
+  * 窗口变成**原生样式**，且自带原生下拉 `dp_blueprint`（标准 `TMP_Dropdown`）
+  * 只是数值是制造台的默认值（游戏按制造台配方表填的）
+
+→ 于是思路从「自绘一个像它的」改成「**直接用游戏的原生控件 + 自己填数据**」。
+
+## 实现
+- 新增 `NativeUi.cs`：
+  * `Find<T>(window, 字段名)` —— 按**字段名**从窗口取控件（先反射窗口自身的
+    `[SerializeField]` 字段，再按物体名兜底）。这是通用做法，换任何窗口预制体都适用。
+  * `HideAll(window, 字段名…)` —— 隐藏对该建筑无意义的控件
+- 新增 `NativeDropdown.cs`：用 **TMP_Dropdown 标准 API**（`ClearOptions` / `AddOptions`
+  / `SetValueWithoutNotify` / `RefreshShownValue` / `onValueChanged`）把我们的物品候选
+  填进 `dp_blueprint`
+- `FacilityWindowUi.Apply`：**原生下拉放在最前面**处理（后面有 `if (coverage == null) return;`，
+  而 `window_blacksmith` 没有 `txt_forest_coverage_rate`，会把它全 return 掉 —— 踩过）
+- 隐藏制造台专有控件：配方行、材料设置、自动制作、制作进度、材料取用范围
+
+## IL2CPP 三个坑（本次踩到并解决）
+1. lambda 不能隐式转 `UnityAction<int>` → 必须显式 `(UnityAction<int>)(...)`
+2. `AddOptions(List<string>)` 在 IL2CPP 里不生成 → 自己构造 `List<TMP_Dropdown.OptionData>`
+3. 控件处理顺序（见上）
+
+## 实测：整条链路跑通 ✔
+```
+F10 打开窗口尝试：guid=27249342 sid=105050
+原生下拉已填充 4 项，当前=2（dp_blueprint）
+F10 调用 ShowWindow() 成功
+原生下拉：共 4 项，当前 2，切到 3
+原生下拉选中索引 3 → 额外产品 612001
+cfg: 额外产品 = 612001
+```
+截图确认：窗口标题「超级生产所」+ 工人数 10± + **金色原生下拉显示「红宝石 +10/日」**
++ 今年/去年产量记录。
+
+## 新增测试钩子
+- F8：操作原生下拉（读值→切下一项→校验 cfg 写入），不依赖 OS 鼠标标定
+- F10：打开本 mod 建筑的窗口（调 `Facility.ShowWindow()`），无人值守测试用
+
+## 配套
+- 基线快照 `C:\AI\mod\_baseline_20260914` + 一键回滚 `_tools/rollback_baseline.ps1`
+  （用户要求"多多尝试"，所以每组实验都要能 5 秒回退）
+- 新增 `docs/自定义建筑与原生UI.md`：框架文档，含控件对照表、三步接入法、
+  IL2CPP 坑、以及**走过的四条弯路**（自绘 UI / sizeDelta 当宽度 / 运行时加 GameObject 崩游戏 /
+  挂业务方法崩游戏）
+- 新增 `_tools/probe_code_db.py`：检索反编译语料库 `C:\AI\游戏向量库\code_meta.json`
