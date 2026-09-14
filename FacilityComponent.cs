@@ -23,29 +23,11 @@ public class FacilityComponent : MonoBehaviour
     private bool _testKeyLatch;
 
     /// <summary>
-    /// 诊断热键 F9：把场景里所有设施（含移动预览体）打一份清单。
-    ///
-    /// 为什么需要「按键时抓」而不是自动抓：移动设施的交互是瞬时的
-    /// （按住拖动/点一下放下），程序很难正好在那一刻自动采样；
-    /// 让玩家在**移动过程中**按一下 F9，就能把当时的对象抓下来。
-    /// 输出只在 cfg「日志详细模式」=true 时有内容。
+    /// ⚠ 曾经的诊断热键 F9（往日志里倒设施清单）**已移除**：
+    /// 用户反馈「按下 F9 后刷屏太多」——它一次要打几十行对象信息，
+    /// 而且诊断目的已经达到（移动预览体的问题已修好）。留着只会制造噪音。
+    /// 需要时改用 `CustomSprite.DumpAllFacilities(tag)` 手动调一次即可。
     /// </summary>
-    private bool _dumpKeyLatch;
-
-    private void PollDumpHotkey()
-    {
-        try
-        {
-            bool down = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F9);
-            if (down && !_dumpKeyLatch)
-            {
-                Plugin.LogV("[Facility] === F9 手动抓取 ===");
-                CustomSprite.DumpAllFacilities("F9 手动抓取");
-            }
-            _dumpKeyLatch = down;
-        }
-        catch (Exception ex) { Plugin.LogV($"[Facility] F9 热键失败: {ex.Message}"); }
-    }
 
     /// <summary>自定义外观的延迟初始化开关（每帧轮询，成功后置 true 不再试）</summary>
     private bool _customSpriteReady;
@@ -63,7 +45,6 @@ public class FacilityComponent : MonoBehaviour
     private void Update()
     {
         PollTestHotkey();
-        PollDumpHotkey();
         PollCustomSprite();
 
         if (Time.time < _nextAt) return;
