@@ -119,8 +119,11 @@ internal static class FacilityWindowUi
         barRt.anchorMax = new Vector2(srcRt.anchorMin.x, srcRt.anchorMin.y);
         float contentW = ContentWidth(window, srcRt);
         barRt.sizeDelta = new Vector2(contentW, BarHeight);
-        Plugin.LogV($"[FacilityUI] 下拉框宽度算法：content_area/参照文本 → {contentW:0}px" +
-                    $"（原来写死 {BarWidth}，锚点拉伸时那个值不是实际宽度）");
+
+        // 诊断：把选择条到窗口根节点的**父链**打出来（名字 + rect 宽 + 锚点 + 位置）。
+        // 用户反复反馈「长度还是超出」，需要确认到底哪一层的 rect 比窗口宽 ——
+        // 如果父容器本身就比可见窗口宽，那么子控件「和父容器同宽」照样会超出。
+        if (Plugin.VerboseEntry?.Value == true) DumpParentChain(window, bar);
 
         // 让候选列表**每帧跟随**标题条（窗口被拖动/换位置后列表会飘走，
         // 早期版本只在展开那一刻算一次位置，所以「打开后下拉框不正确」）。
@@ -575,6 +578,43 @@ internal static class FacilityWindowUi
             if (c != null && c.name == name) return c;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 诊断：把选择条 → 窗口根 的父链打一行（名字 / rect 宽高 / 世界位置 / 锚点）。
+    /// 用来确认「到底是哪一层比窗口宽」——用户反复反馈下拉框超出窗口，
+    /// 很可能是**父容器本身就比窗口宽**，那样子控件就算「与父同宽」也会超出。
+    /// </summary>
+    private static void DumpParentChain(GameObject window, GameObject bar)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder("[FacilityUI] 选择条父链:\n");
+            var cur = bar.transform;
+            int depth = 0;
+            while (cur != null && depth++ < 10)
+            {
+                var rt = cur.GetComponent<RectTransform>();
+                if (rt == null) { sb.Append("  (无 RectTransform) ").Append(cur.name).Append('\n'); break; }
+                sb.Append("  ").Append(new string(' ', depth * 2)).Append(cur.name)
+                  .Append(" w=").Append(rt.rect.width.ToString("0"))
+                  .Append(" h=").Append(rt.rect.height.ToString("0"))
+                  .Append(" pos=").Append(rt.position.x.ToString("0")).Append(',')
+                  .Append(rt.position.y.ToString("0"))
+                  .Append(" anchor=").Append(rt.anchorMin.x.ToString("0.##")).Append('-')
+                  .Append(rt.anchorMax.x.ToString("0.##"))
+                  .Append(cur.gameObject == window ? "   ← 窗口根" : "")
+                  .Append('\n');
+                if (cur.gameObject == window) break;
+                cur = cur.parent;
+            }
+            var wWin = window.GetComponent<RectTransform>();
+            if (wWin != null)
+                sb.Append("  窗口根 rect = ").Append(wWin.rect.width.ToString("0")).Append('x')
+                  .Append(wWin.rect.height.ToString("0")).Append('\n');
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 父链诊断失败: {ex.Message}"); }
     }
 
     /// <summary>

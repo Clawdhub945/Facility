@@ -22,6 +22,11 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>自动化测试热键：F8 程序化点击窗口里的「额外产品」下拉框（每帧只触发一次）。</summary>
     private bool _testKeyLatch;
 
+    /// <summary>预制体清单只打一次（找游戏自带 UI 预制体用）</summary>
+    private bool _dumpedPrefabs;
+
+    
+
     /// <summary>
     /// ⚠ 曾经的诊断热键 F9（往日志里倒设施清单）**已移除**：
     /// 用户反馈「按下 F9 后刷屏太多」——它一次要打几十行对象信息，
@@ -90,6 +95,16 @@ public class FacilityComponent : MonoBehaviour
             // 所以每帧都扫一遍（FindObjectsOfType 很便宜，建筑数量也就几座）。
             // 早期版本把它放在 _customSpriteReady 判断里，导致读档后已存在的建筑漏掉换图。
             CustomSprite.ReapplyToAll();
+
+            // 进档后打一次预制体清单（详细模式）——找游戏自带的 UI 预制体
+            // （目标是原生下拉 StuffIconDropdown / dp_item_list）
+            if (!_dumpedPrefabs && Time.frameCount > 120)
+            {
+                _dumpedPrefabs = true;
+                PrefabProbe.Dump("dropdown");
+                PrefabProbe.Dump("dp_item");
+                PrefabProbe.Dump("window_");
+            }
 
             // 被「移动设施」等流程要求强制补一次时，顺带打一份设施清单（详细模式），
             // 用来认出「移动过程中跟随光标的预览体」是什么对象。
