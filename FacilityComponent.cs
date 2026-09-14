@@ -22,8 +22,71 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>自动化测试热键：F8 程序化点击窗口里的「额外产品」下拉框（每帧只触发一次）。</summary>
     private bool _testKeyLatch;
 
+    /// <summary>
+    /// 诊断热键 F9：把场景里所有设施（含移动预览体）打一份清单。
+    ///
+    /// 为什么需要「按键时抓」而不是自动抓：移动设施的交互是瞬时的
+    /// （按住拖动/点一下放下），程序很难正好在那一刻自动采样；
+    /// 让玩家在**移动过程中**按一下 F9，就能把当时的对象抓下来。
+    /// 输出只在 cfg「日志详细模式」=true 时有内容。
+    /// </summary>
+    private bool _dumpKeyLatch;
+
+    private void PollDumpHotkey()
+    {
+        try
+        {
+            bool down = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F9);
+            if (down && !_dumpKeyLatch)
+            {
+                Plugin.LogV("[Facility] === F9 手动抓取 ===");
+                CustomSprite.DumpAllFacilities("F9 手动抓取");
+            }
+            _dumpKeyLatch = down;
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] F9 热键失败: {ex.Message}"); }
+    }
+
     /// <summary>自定义外观的延迟初始化开关（每帧轮询，成功后置 true 不再试）</summary>
     private bool _customSpriteReady;
+
+    /// <summary>
+    /// 主线程循环（每帧）：
+    ///   1. 轮询热键（F8 测试点击下拉框 / F9 抓设施清单）
+    ///   2. 维持自定义外观（每帧状态校验）
+    ///   3. 每 1.5 秒检查一次 cfg 与游戏日历，跨日就发产
+    ///
+    /// ⚠ 这个方法是本 mod 的命脉，**改动前务必确认它还在**：
+    /// 曾经被脚本误删过一次（文件里只剩 Poll 系列方法），结果每日产出悄悄停摆 ——
+    /// 编译照样通过、游戏不报错，唯一症状是「日志里不再出现产出记录」。
+    /// </summary>
+    private void Update()
+    {
+        PollTestHotkey();
+        PollDumpHotkey();
+        PollCustomSprite();
+
+        if (Time.time < _nextAt) return;
+        _nextAt = Time.time + 1.5f;
+        try
+        {
+            // cfg 热生效：改 BepInEx/config/claude.facility.cfg 后最多 1.5s 生效
+            try { Plugin.ModConfigFile?.Reload(); } catch { }
+
+            int day = GetDayKey();
+            if (day < 0) return;
+            if (_lastDay < 0) { _lastDay = day; return; } // 进档/启动首日只记基线，不产出（防重复发）
+            if (day == _lastDay) return;
+            _lastDay = day;
+            _producedToday.Clear();
+
+            ProduceForNewDay(day);
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogError($"[Facility] Update 异常: {ex}");
+        }
+    }
 
     /// <summary>
     /// 自定义外观 / 图标的**延迟初始化**：插件 Load() 时世界还没加载，
