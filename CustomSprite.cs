@@ -483,6 +483,24 @@ internal static class CustomSprite
 
     /// <summary>上次校验时场景里的超级生产所数量（用于日志节流）</summary>
     private static int _lastReapplyCount = -1;
+
+    /// <summary>
+    /// 请求「稍后强制补一次外观」：移动设施等流程里对象状态还在变，
+    /// 由主线程循环在下一帧统一补（`FacilityComponent` 每帧都会调 `ReapplyToAll`，
+    /// 这里只是把标记置上，方便日志与将来做优先级）。
+    /// </summary>
+    internal static void RequestReapplySoon()
+    {
+        _forceNext = true;
+    }
+
+    private static bool _forceNext;
+    internal static bool ConsumeForceFlag()
+    {
+        bool f = _forceNext;
+        _forceNext = false;
+        return f;
+    }
 }
 
 /// <summary>
@@ -519,5 +537,51 @@ internal static class CustomAppearancePatch
             CustomSprite.ApplyAppearance(__result, rotation);
         }
         catch (Exception ex) { Plugin.LogError($"[Facility] 外观补丁异常: {ex}"); }
+    }
+}
+
+/// <summary>
+/// 挂钩**移动设施**：移动时游戏会另建一个预览体（走的是和建造不同的路径），
+/// 所以预览里显示的是原模型（采集营地）。用户实测反馈「点击移动设施后又变回了采集营地」。
+///
+/// 这里挂 `Facility.MoveFacility` / `Facility.DoAfterMoveFacility` 的 Postfix，
+/// 一进入移动流程就立刻把外观换回来（`ReapplyToAll` 内部是幂等的，多调无害）。
+/// </summary>
+[HarmonyPatch]
+internal static class MoveFacilityAppearancePatch
+{
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
+    static IEnumerable<System.Reflection.MethodBase> TargetMethods()
+    {
+        var list = new List<System.Reflection.MethodBase>();
+        var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly;
+        for (var t = typeof(Facility); t != null && t != typeof(object); t = t.BaseType)
+        {
+            System.Reflection.MethodInfo[] ms;
+            try { ms = t.GetMethods(flags); } catch { continue; }
+            foreach (var m in ms)
+            {
+                if (m.Name != "MoveFacility" && m.Name != "DoAfterMoveFacility"
+                    && m.Name != "OnMoveFacilityClicked") continue;
+                if (m.GetParameters().Length > 1) continue;
+                list.Add(m);
+            }
+        }
+        if (list.Count > 0)
+            Plugin.LogV($"[Facility] 移动设施外观补丁挂了 {list.Count} 个方法: " +
+                        string.Join(", ", list.ConvertAll(m => m.Name)));
+        return list;
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
+    static void Postfix()
+    {
+        try
+        {
+            // 回到主线程下一帧统一补（移动流程里对象状态还在变，立刻补可能被覆盖）
+            CustomSprite.RequestReapplySoon();
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 移动外观补丁异常: {ex.Message}"); }
     }
 }

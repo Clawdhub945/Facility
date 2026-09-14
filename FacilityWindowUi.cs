@@ -110,6 +110,73 @@ internal static class FacilityWindowUi
             CloseList(FindOwnerOf(_openListOwner));
 
         LogSelectorScreenPos(bar);
+
+        // 详细模式：把窗口里所有控件 + 下拉框的实际状态打出来。
+        // 用途：用户反馈「下拉框不正确 / 没有工作」时，靠这份清单精确定位
+        // （是位置不对、被遮挡、还是点击没派发），不用再猜。
+        if (Plugin.VerboseEntry?.Value == true) DumpWindowState(window, bar);
+    }
+
+    /// <summary>诊断：把窗口控件的实际坐标与下拉框状态打一行（仅详细模式）</summary>
+    private static void DumpWindowState(GameObject window, GameObject bar)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder("[FacilityUI] 窗口诊断:\n");
+            foreach (var t in window.GetComponentsInChildren<TMPro.TMP_Text>(true))
+            {
+                if (t == null) continue;
+                var rt = t.rectTransform;
+                sb.Append("  [TMP] ").Append(t.name)
+                  .Append(" pos=").Append(rt.position.x.ToString("0")).Append(',')
+                  .Append(rt.position.y.ToString("0"))
+                  .Append(" size=").Append(rt.rect.width.ToString("0")).Append('x')
+                  .Append(rt.rect.height.ToString("0"))
+                  .Append(" text=").Append(t.text != null && t.text.Length > 18 ? t.text[..18] : t.text)
+                  .Append('\n');
+            }
+            var barRt = bar.GetComponent<RectTransform>();
+            sb.Append("  [选择条] ").Append(bar.name)
+              .Append(" screen=").Append(barRt.position.x.ToString("0")).Append(',')
+              .Append(barRt.position.y.ToString("0"))
+              .Append(" size=").Append(barRt.rect.width.ToString("0")).Append('x')
+              .Append(barRt.rect.height.ToString("0"))
+              .Append(" active=").Append(bar.activeInHierarchy).Append('\n');
+            var list = FindChildByName(bar.transform.parent, DropdownListName);
+            if (list == null)
+            {
+                sb.Append("  [候选列表] 不存在\n");
+            }
+            else
+            {
+                var lrt = list.GetComponent<RectTransform>();
+                sb.Append("  [候选列表] screen=").Append(lrt.position.x.ToString("0")).Append(',')
+                  .Append(lrt.position.y.ToString("0"))
+                  .Append(" size=").Append(lrt.rect.width.ToString("0")).Append('x')
+                  .Append(lrt.rect.height.ToString("0"))
+                  .Append(" open=").Append(list.activeSelf)
+                  .Append(" rows=").Append(list.transform.childCount).Append('\n');
+                for (int i = 0; i < list.transform.childCount && i < 6; i++)
+                {
+                    var row = list.transform.GetChild(i);
+                    if (row == null) continue;
+                    var rrt = row.GetComponent<RectTransform>();
+                    var btn = row.GetComponent<Button>();
+                    var img = row.GetComponent<Image>();
+                    sb.Append("    [行").Append(i).Append("] ").Append(row.name)
+                      .Append(" screen=").Append(rrt.position.x.ToString("0")).Append(',')
+                      .Append(rrt.position.y.ToString("0"))
+                      .Append(" size=").Append(rrt.rect.width.ToString("0")).Append('x')
+                      .Append(rrt.rect.height.ToString("0"))
+                      .Append(" button=").Append(btn != null)
+                      .Append(" raycast=").Append(img != null && img.raycastTarget)
+                      .Append(" active=").Append(row.gameObject.activeInHierarchy)
+                      .Append('\n');
+                }
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 窗口诊断失败: {ex.Message}"); }
     }
 
     /// <summary>

@@ -117,9 +117,9 @@ public class Plugin : BasePlugin
                      {
                          typeof(FacilityGetOriginalWorkPosCountPatch),
                          typeof(CustomAppearancePatch),
-                         typeof(FacilityWindowSetInfoPatch),
-                         typeof(FacilityWindowRefreshPatches),
-                     })
+                         typeof(FacilityWindowPatches),
+                         typeof(MoveFacilityAppearancePatch),
+                                              })
             {
                 try
                 {
