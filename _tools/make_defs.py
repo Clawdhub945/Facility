@@ -69,11 +69,14 @@ SUPER_TXT_ID = 300                    # 建造菜单分类段号（与旧建筑�
 FURNACE3_ID = 105051
 FURNACE3_NAME = "三乘三高炉实验"
 FURNACE3_DESC = "兼容性实验建筑：3×3 占地 + 熔炉机制。用于验证尺寸是否兼容。"
-FURNACE3_PREFAB = "mine"              # 3×3 骨架（矿井）
+# ⚠ 骨架 prefab **自带建造地形限制**：mine（矿井）只能建在山体上（用户实测）。
+#   限制来自预制体本身（build.json 里没有地形字段），不是数据能改的。
+#   换成 	rading_desk（交易台）—— 原生 3×3、平地上可建、无限制字段。
+FURNACE3_PREFAB = "trading_desk"     # 3×3 骨架（交易台）
 FURNACE3_CLASS = "FacilityFurnace"    # 熔炉机制（燃料 + 生产计划）
 FURNACE3_WINDOW = "window_furnace"
-FURNACE3_IMG = "ui_105013"   # 暂借矿井图标（保证菜单里不是白块）
-FURNACE3_IMG_ON_MAP = "mine_0"
+FURNACE3_IMG = "ui_103004"   # 暂借交易台图标（保证菜单里不是白块）
+FURNACE3_IMG_ON_MAP = "trading_desk_0"
 FURNACE3_CELL = 3
 
 TEST_DIR = Path(r"C:\TerritoryModTest")
