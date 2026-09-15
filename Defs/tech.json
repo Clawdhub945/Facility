@@ -37,5 +37,13 @@
     "seed_id": "",
     "event_id": "",
     "tech_desc_zh-CN": "建造高炉：以煤为燃料把铁锭炼成钢"
+  },
+  {
+    "txt_id": 3700,
+    "tech_id": 0,
+    "facility_id": 105054,
+    "seed_id": "",
+    "event_id": "",
+    "tech_desc_zh-CN": "建造高炉（3×3）：以煤为燃料冶炼钢材"
   }
 ]

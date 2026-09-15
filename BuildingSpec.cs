@@ -50,6 +50,13 @@ internal sealed class BuildingSpec
     /// <summary>是否改写窗口文案（标题/说明/森林覆盖率等）</summary>
     internal bool RewriteWindowTexts { get; init; } = true;
 
+    /// <summary>
+    /// **自研冶炼规格**（null = 这座建筑不做冶炼）。
+    /// 见 <see cref="SmelterConsumer"/>：每游戏日检查原料与燃料，够就消耗并产出。
+    /// 用途：3×3 高炉这种「原生机制做不出」的建筑。
+    /// </summary>
+    internal SmeltingRecipe? Smelting { get; init; }
+
     /// <summary>自定义外观（贴图前缀）；null = 用原版外观</summary>
     internal string? CustomSpritePrefix { get; init; }
 }
@@ -151,8 +158,46 @@ internal static class Buildings
         CustomSpritePrefix = null,
     };
 
+    /// <summary>
+    /// **3×3 高炉 105054（自研炉）** —— 工业 mod 的主力建筑。
+    ///
+    /// ## 为什么不复用游戏熔炉机制
+    /// `window_furnace` 的控件依赖 prefab 上的 `FacilityFurnace` 组件，
+    /// 而原生熔炉骨架是 **2×2**（对照实验结论：借 3×3 骨架配 `FacilityFurnace`
+    /// 会导致「窗口能显示但控件不可交互」）。用户要求 3×3，
+    /// 所以燃料 + 配方 + 产出由本 mod 的 <see cref="SmelterConsumer"/> 自己实现。
+    ///
+    /// ## 工作方式
+    /// 骨架用 `trading_desk`（3×3、无地形限制、自带仓库），窗口借用
+    /// `window_gatherers_hut`（有工人/存储界面）。玩家把**铁锭与煤放进仓库**，
+    /// 每游戏日由 `SmelterConsumer` 结算一次：够料就扣除并产出钢。
+    /// </summary>
+    internal static readonly BuildingSpec BlastFurnace3 = new()
+    {
+        StuffId = Plugin.BlastFurnace3Id,            // 105054
+        Name = "高炉(3×3)",
+        WindowPrefab = "window_gatherers_hut",
+        DailyProducer = false,                       // 不做「工人×产出表」那套
+        FillExtraProductDropdown = false,
+        HideControls = Array.Empty<string>(),
+        // ⚠ 不改窗口文案：我们借的是采集营地窗口，它的文案改写逻辑是针对
+        //   「工人每日产出」写的；高炉是冶炼，写上去会词不达意。
+        //   （真正该显示的是「配方/燃料/进度」，那需要专门做 UI，后续再说）
+        RewriteWindowTexts = false,
+        CustomSpritePrefix = null,
+        // ★ 自研冶炼规格：铁锭×2 + 煤×1 → 钢×1（每游戏日一炉）
+        Smelting = new SmeltingRecipe
+        {
+            Inputs = new System.Collections.Generic.List<(int id, int n)> { (603001, 2) },
+            FuelId = 601001,          // 煤
+            FuelPerBatch = 1,
+            OutputId = 603010,        // 钢
+            OutputCount = 1,
+        },
+    };
+
     internal static readonly BuildingSpec[] All =
-        { Producer, SuperProducer, Furnace3Test, FurnaceNativeTest, BlastFurnace };
+        { Producer, SuperProducer, Furnace3Test, FurnaceNativeTest, BlastFurnace, BlastFurnace3 };
 
     /// <summary>本 mod 全部设施 id</summary>
     internal static int[] AllIds()

@@ -56,6 +56,15 @@ public class Plugin : BasePlugin
     /// </summary>
     public const int BlastFurnaceId = 105053;
 
+    /// <summary>
+    /// **工业 mod 主力建筑 105054「高炉(3×3)」** —— 走本 mod **自研**的冶炼逻辑
+    /// （<see cref="SmelterConsumer"/>：每游戏日消耗 铁锭×2 + 煤×1 → 钢×1）。
+    ///
+    /// 为什么不复用游戏的熔炉机制：那套要求 **2×2 原生骨架**
+    /// （对照实验：借 3×3 骨架配 `FacilityFurnace` → 窗口控件不可交互）。
+    /// </summary>
+    public const int BlastFurnace3Id = 105054;
+
     /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
     /// <summary>
     /// 本 mod 管辖的全部设施 id。

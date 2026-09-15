@@ -153,5 +153,27 @@
     "op_increase_step": 1,
     "stuff_namezh-CN": "高炉",
     "desczh-CN": "冶炼钢材的工业设施。以煤为燃料，把铁锭炼成钢。\n# 配方：铁锭 → 钢；燃料：煤（在窗口里设置燃料类型）"
+  },
+  {
+    "stuff_id": 105054,
+    "price": 0,
+    "can_carry_one_by_one_anytime": 0,
+    "incineration_result": 0,
+    "spoilage_year_limit": 0,
+    "disable": 0,
+    "can_pick_up_by_ant": 0,
+    "ignore_in_summary": 0,
+    "sort_index": 0,
+    "stuff_type": 1,
+    "stuff_sub_type": 105,
+    "effect_value": 0.0,
+    "prefab": "trading_desk",
+    "stuff_img": "ui_105054",
+    "stuff_img_on_map": "trading_desk_0",
+    "weight": 1.0,
+    "reward_count_once": 0,
+    "op_increase_step": 1,
+    "stuff_namezh-CN": "高炉",
+    "desczh-CN": "工业高炉（3×3）。以煤为燃料，把铁锭冶炼成钢。\n# 把铁锭与煤放进建筑仓库，每个游戏日自动冶炼一次\n# 配方与燃料消耗由本 mod 配置"
   }
 ]

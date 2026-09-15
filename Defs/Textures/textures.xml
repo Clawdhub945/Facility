@@ -60,4 +60,10 @@
       action="add"
       anchor="0.5,0.5"
       />
+
+  <Image
+      file="ui_105054.png"
+      action="add"
+      anchor="0.5,0.5"
+      />
 </ModImages>

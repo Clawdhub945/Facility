@@ -88,6 +88,9 @@ def main():
 
     bf = blast_furnace()
     bf.save(OUT / "ui_105053.png"); made.append("ui_105053.png")
+    # 3×3 高炉（自研炉）：图标加宽炉体以示区别
+    bf3 = blast_furnace()
+    bf3.save(OUT / "ui_105054.png"); made.append("ui_105054.png")
 
     for m in made:
         p = OUT / m

@@ -165,6 +165,41 @@ STEEL_TOOL_RECIPE = {
     "materials": [(604001, 10), (STEEL_ID, 3)],   # 原木×10 + 钢×3
 }
 
+# ---------------------------------------------------------------------------
+# 3×3 高炉（自研炉）
+#
+# ## 为什么自研
+# 对照实验结论：`window_furnace` 的控件依赖 **prefab 上的 FacilityFurnace 组件**，
+# 而原生熔炉骨架是 **2×2** —— 借 3×3 骨架配 FacilityFurnace 会导致
+# 「窗口能显示但控件不可交互」（配方下拉空、燃料按钮点不动）。
+# 用户要 3×3，所以燃料/配方/产出逻辑由本 mod 的 DLL 自己实现
+# （见 `SmelterConsumer.cs`）。
+#
+# ## 骨架选型
+# 用 `trading_desk`（交易台，3×3，无地形限制）：它带 FacilityTradingDesk 组件，
+# 但**我们不需要它的功能** —— 只要能放、能存东西。
+# 冶炼由我们自己的 DLL 做（换日结算），所以**不与它的组件冲突**。
+# 窗口用 `window_gatherers_hut`（有工人/存储界面，我们最熟）。
+# ---------------------------------------------------------------------------
+BLAST3_ID = 105054
+BLAST3_NAME = "高炉"
+BLAST3_DESC = ("工业高炉（3×3）。以煤为燃料，把铁锭冶炼成钢。"
+               "\n# 把铁锭与煤放进建筑仓库，每个游戏日自动冶炼一次"
+               "\n# 配方与燃料消耗由本 mod 配置")
+BLAST3_PREFAB = "trading_desk"      # 3×3 骨架（无地形限制）
+BLAST3_CLASS = "FacilityTradingDesk"
+BLAST3_WINDOW = "window_gatherers_hut"
+BLAST3_IMG = "ui_105054"
+BLAST3_IMG_ON_MAP = "trading_desk_0"
+BLAST3_CELL = 3
+
+# 自研冶炼配方：铁锭×2 + 煤×1 → 钢×1（每游戏日一炉）
+# ⚠ 这份配方与游戏的 blueprint.json **无关** —— 是 SmelterConsumer 自己的规格，
+#   所以 3×3 也能自由定义（不受"配方 UI 按 facility_id 取行"的限制）。
+BLAST3_SMELT_INPUTS = [(603001, 2)]      # 铁锭 ×2
+BLAST3_SMELT_FUEL = (601001, 1)          # 煤 ×1
+BLAST3_SMELT_OUTPUT = (603010, 1)        # 钢 ×1
+
 TEST_DIR = Path(r"C:\TerritoryModTest")
 DEF_DEPLOY_DIR = TEST_DIR / "Defs"
 TEX_DEPLOY_DIR = TEST_DIR / "Textures"
@@ -175,7 +210,7 @@ DEFAULT_PRODUCTS = [(604001, 10, "原木"), (605001, 10, "石料")]
 DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, "红宝石")]
 # formula_id 槽位基数：官方惯例 formula_id = product_id*100 + 序号；
 # 105040 用 40 起、105050 用 50 起，跟官方 206 行都不冲突，也便于一眼认出是本 mod 的行。
-FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51, FURNACE_NATIVE_ID: 52, BLAST_ID: 53}
+FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51, FURNACE_NATIVE_ID: 52, BLAST_ID: 53, BLAST3_ID: 54}
 
 # 建筑外观预设（只对旧建筑 105040 生效；新建筑用 mod 自带贴图）：
 # stuff.json 的 prefab / stuff_img / stuff_img_on_map 都换成目标建筑的资源名。
@@ -414,6 +449,26 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         })
         return r
 
+    def blast3_build_row(guide):
+        """3×3 自研高炉：不依赖游戏的熔炉机制（那套要求 2×2 原生骨架）。
+
+        骨架用 `trading_desk`（3×3、无地形限制）；
+        冶炼由本 mod 的 `SmelterConsumer` 在换日时结算，
+        所以**不需要**给它的 blueprint 写设施配方行。
+        """
+        r = build_row(BLAST3_ID, BLAST3_PREFAB, guide, BLAST3_CELL, BLAST3_CELL)
+        r.update({
+            "class_name": BLAST3_CLASS,
+            "window_prefab": BLAST3_WINDOW,
+            "have_worker": 1,
+            "must_have_worker": 0,          # 自研炉不强制工人（换日自动结算）
+            "has_bag": "1",                 # 自带仓库：放铁锭与煤
+            "res_range": 0,
+            "res_range_anchor": 0,
+            "menu_group": 3,                # 制造段（与 tech.txt_id=3700 配对）
+        })
+        return r
+
     def blast_furnace_build_row(guide):
         """高炉：**原生熔炉骨架**（2×2）+ FacilityFurnace + window_furnace。
 
@@ -461,6 +516,9 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         # 新建筑：高炉（原生熔炉骨架，2×2）
         stuff_row(BLAST_ID, BLAST_NAME, BLAST_DESC,
                   BLAST_IMG, BLAST_IMG_ON_MAP, BLAST_PREFAB),
+        # 新建筑：3×3 高炉（自研炉，走本 mod 的冶炼逻辑）
+        stuff_row(BLAST3_ID, BLAST3_NAME, BLAST3_DESC,
+                  BLAST3_IMG, BLAST3_IMG_ON_MAP, BLAST3_PREFAB),
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
@@ -470,6 +528,7 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         furnace3_build_row(guide_common),
         furnace_native_build_row(guide_common),
         blast_furnace_build_row(guide_common),
+        blast3_build_row(guide_common),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——
     # 100=初始(0) 200=住所(1) 300=食品(2) 3700=制造(3) 1500=物流(4) 600=路桥(7)。
@@ -490,10 +549,13 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         {"txt_id": 3700, "tech_id": 0, "facility_id": BLAST_ID,
          "seed_id": "", "event_id": "",
          "tech_desc_zh-CN": "建造高炉：以煤为燃料把铁锭炼成钢"},
+        {"txt_id": 3700, "tech_id": 0, "facility_id": BLAST3_ID,
+         "seed_id": "", "event_id": "",
+         "tech_desc_zh-CN": "建造高炉（3×3）：以煤为燃料冶炼钢材"},
     ]
     career_rows = [career_row(MOD_ID), career_row(SUPER_ID),
                    career_row(FURNACE3_ID), career_row(FURNACE_NATIVE_ID),
-                   career_row(BLAST_ID)]
+                   career_row(BLAST_ID), career_row(BLAST3_ID)]
 
     blueprint_rows = (make_blueprints(bp_table, stuff_type_by_id, MOD_ID, products_for(MOD_ID)) +
                       make_blueprints(bp_table, stuff_type_by_id, SUPER_ID, products_for(SUPER_ID)))

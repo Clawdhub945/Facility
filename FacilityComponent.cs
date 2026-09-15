@@ -212,6 +212,10 @@ public class FacilityComponent : MonoBehaviour
         _producedToday.Clear();
 
         FacilityProducer.ProduceForAll(dayKey);
+
+        // 自研冶炼炉（3×3 高炉这类原生机制做不出的建筑）：换日结算一次
+        SmelterConsumer.OnNewDay();
+        SmelterConsumer.ProcessAll();
     }
 
     /// <summary>诊断：打印各建筑 career 行的真实字段（排查工位数/工人上限问题用）</summary>
