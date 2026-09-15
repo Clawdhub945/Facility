@@ -1009,27 +1009,29 @@ internal static class FacilityWindowUi
     }
 
     /// <summary>
-    /// 自动化测试钩子（F10）：打开窗口。
-    /// 默认开**本 mod 建筑**的窗口；如果场景里有**原版制造台**，先用一次开制造台 ——
-    /// 用来回归验证「制造台窗口没有被我们改坏」（用户实测报过：材料需求/进度/
-    /// 材料取用范围被隐藏）。
+    /// 自动化测试钩子（F10）：打开建筑窗口。
+    /// **优先开 `PreferredProbeStuffId` 指定的那座**（用于做对照实验，例如
+    /// 105052 熔炉对照 vs 105051 三乘三高炉），否则开第一座本 mod 建筑。
     /// </summary>
     internal static void TestOpenWindow()
     {
         try
         {
-            // ① 先试原版制造台（105010）：确认归属判断会拒绝它
-            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            int want = PreferredProbeStuffId;
+            if (want != 0)
             {
-                if (f == null) continue;
-                int sid = 0;
-                try { sid = f.stuff_id; } catch { }
-                if (sid != 105010) continue;                       // 原版制造台
-                Plugin.LogV("[FacilityUI] F10 先开原版制造台窗口（回归验证用）");
-                if (TryShowWindow(f)) return;
+                foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+                {
+                    if (f == null) continue;
+                    int sid = 0;
+                    try { sid = f.stuff_id; } catch { }
+                    if (sid != want) continue;
+                    Plugin.LogV($"[FacilityUI] F10 开对照建筑 sid={sid} guid={SafeGuid(f)}");
+                    if (TryShowWindow(f)) return;
+                }
+                Plugin.LogV($"[FacilityUI] F10 没找到 sid={want} 的建筑，改开第一座本 mod 建筑");
             }
 
-            // ② 再开我们的建筑
             foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
             {
                 if (f == null) continue;
@@ -1043,6 +1045,12 @@ internal static class FacilityWindowUi
         }
         catch (Exception ex) { Plugin.LogV($"[FacilityUI] F10 失败: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// F10 优先打开的设施 id（0 = 不指定，开第一座本 mod 建筑）。
+    /// 做对照实验时由 `FacilityComponent` 按热键设置。
+    /// </summary>
+    internal static int PreferredProbeStuffId = 0;
 
     /// <summary>调游戏的 ShowWindow/OpenWindow/OnClick（按名字找，找到就调）</summary>
     private static bool TryShowWindow(Facility f)

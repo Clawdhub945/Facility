@@ -134,10 +134,21 @@ public class FacilityComponent : MonoBehaviour
             if (down && !_testKeyLatch) FacilityWindowUi.TestClickSelector();
             _testKeyLatch = down;
 
-            // F10 = 打开本 mod 建筑的窗口。加它的理由：无人值守测试里 OS 级鼠标点击
-            // 的坐标标定太脆（分辨率会变），而「验证原生下拉」必须先有窗口。
+            // F10 = 打开建筑窗口（无人值守测试用，OS 级鼠标点击标定太脆）。
+            // **Shift+F10** = 打开「熔炉对照实验」(105052)，用来和 3×3 高炉做对照。
             bool down10 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F10);
-            if (down10 && !_openKeyLatch) FacilityWindowUi.TestOpenWindow();
+            if (down10 && !_openKeyLatch)
+            {
+                bool shift = false;
+                try
+                {
+                    shift = UnityEngine.Input.GetKey(UnityEngine.KeyCode.LeftShift)
+                            || UnityEngine.Input.GetKey(UnityEngine.KeyCode.RightShift);
+                }
+                catch { }
+                FacilityWindowUi.PreferredProbeStuffId = shift ? Plugin.FurnaceNativeTestId : 0;
+                FacilityWindowUi.TestOpenWindow();
+            }
             _openKeyLatch = down10;
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 测试热键轮询失败: {ex.Message}"); }

@@ -139,6 +139,61 @@ def load(table: str):
     return json.loads((EXTRA_DATA / f"{table}.json").read_text(encoding="utf-8"))
 
 
+def clone_facility_blueprints(bp_table, src_facility_id, dst_facility_id, seen_formula_ids=None):
+    """把**某个原生建筑的全部配方**克隆给我们的建筑。
+
+    ## 用途
+    熔炉系建筑（`FacilityFurnace`）的配方 UI 读的是 `blueprint.json` 里
+    `facility_id == 自己` 的那些行。新建一座熔炉（id 105052）时，
+    游戏**不会**自动继承原生熔炉(105028) 的配方 —— 实测：窗口里
+    「工作类型」有值但**配方下拉是空的**。
+    所以要显式克隆一份，把 `facility_id` 换成我们的 id。
+
+    ## formula_id 的处理
+    官方惯例是 `formula_id = product_id * 100 + 序号`。克隆时保持 product_id 不变，
+    只换末尾的序号（用 `FORMULA_SLOT_BASE[dst]` 起递增），保证：
+      * 不同的 (产品, 材料) 组合仍有不同 formula_id
+      * 不占用原生行的 formula_id（避免冲突）
+    同一 (product_id, 材料组合) 视为同一配方，**去重**。
+
+    ## ⚠ 为什么不去改原生行
+    改 `facility_id=105028` 的行等于**改原版熔炉**（跨 mod 写同一张表 → 冲突风险），
+    而且会让原生熔炉的配方也变成我们的。所以只**新增**属于我们 id 的行。
+    """
+    if seen_formula_ids is None:
+        seen_formula_ids = set()
+
+    mat_keys = [("_material_1", "_n1"), ("_material_2", "_n2"),
+                ("_material_3", "_n3"), ("_material_4", "_n4")]
+    rows = []
+    dedup = set()
+    slot = 1
+    for src in bp_table:
+        if src.get("facility_id") != src_facility_id:
+            continue
+        sig = (src.get("product_id"),) + tuple(src.get(k) for k, _ in mat_keys)
+        if sig in dedup:
+            continue
+        dedup.add(sig)
+
+        row = dict(src)
+        # 找一个没被占用的 formula_id（保持 product_id 前缀，只换末尾序号）
+        pid = src.get("product_id") or 0
+        while True:
+            fid = pid * 100 + slot
+            slot += 1
+            if fid not in seen_formula_ids:
+                break
+        seen_formula_ids.add(fid)
+
+        row["formula_id"] = fid
+        row["facility_id"] = dst_facility_id
+        row["disable"] = 0
+        row["need_research"] = 0        # 免科技：新建筑开局即可用
+        rows.append(row)
+    return rows
+
+
 def make_blueprints(bp_table, stuff_type_by_id, facility_id, products):
     """按产品清单生成 blueprint 行。
 
@@ -326,6 +381,16 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
 
     blueprint_rows = (make_blueprints(bp_table, stuff_type_by_id, MOD_ID, products_for(MOD_ID)) +
                       make_blueprints(bp_table, stuff_type_by_id, SUPER_ID, products_for(SUPER_ID)))
+
+    # 熔炉系建筑：克隆**原生熔炉(105028) 的全部配方**给它自己。
+    # 原因：配方 UI 按 facility_id 取行，新建筑不会自动继承 → 实测窗口里配方下拉是空的。
+    # ⚠ 只**新增**属于我们 id 的行，**不动**原生 105028 的行（跨 mod 改原版表有冲突风险）。
+    used_fids = {r.get("formula_id") for r in blueprint_rows}
+    used_fids |= {r.get("formula_id") for r in bp_table}
+    for fid_own in (FURNACE_NATIVE_ID, FURNACE3_ID):
+        cloned = clone_facility_blueprints(bp_table, 105028, fid_own, used_fids)
+        blueprint_rows += cloned
+        print(f"  熔炉配方克隆 → {fid_own}: {len(cloned)} 条（源 105028）")
 
     # 科技树表**不要写**：游戏 mod 通道不读 tech_tree.json（实测写进去也不会进树）。
     # 保留空表只为了让旧部署目录里的同名文件被清空，避免残留旧内容。
