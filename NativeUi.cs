@@ -130,19 +130,58 @@ internal static class NativeUi
     }
 
     /// <summary>隐藏一个控件（连带它的物体）</summary>
-    internal static bool Hide(GameObject window, string fieldName)
+    internal static bool Hide(GameObject window, string fieldName, bool byNameFallback = false)
     {
-        var go = FindGo(window, fieldName);
+        var go = FindGo(window, fieldName, byNameFallback);
         if (go == null) return false;
         try { if (go.activeSelf) go.SetActive(false); return true; }
         catch { return false; }
     }
 
-    /// <summary>批量隐藏</summary>
+    /// <summary>
+    /// 批量隐藏。**两阶段**：
+    ///   ① 先按窗口类的 `[SerializeField]` 字段精确命中（最安全）
+    ///   ② 剩下的再在**本窗口子树内**按物体名找（用于 `res_grid` 里的
+    ///      「可使用的材料:」、`my_progress_make` 的「建造 100%」这类**嵌套**物体 ——
+    ///      它们不是窗口类的直接字段，精确反射找不到）。
+    ///
+    /// ⚠ **只能在已确认「这个窗口属于本 mod 建筑」之后调用**（调用点已判）。
+    /// 早期版本把第 ② 步做成全局按名搜索，结果把**原版制造台**窗口里的同名物体
+    /// （`res_grid` / `my_progress_make` / `num_adjust_of_materials_access_range`）
+    /// 也隐藏了 —— 用户实测截图：制造台的材料需求、进度、材料取用范围数字全消失。
+    /// 现在第 ② 步限定在**本窗口子树**内，且调用方已保证窗口是我们的。
+    /// </summary>
     internal static int HideAll(GameObject window, params string[] fieldNames)
     {
         int n = 0;
-        foreach (var f in fieldNames) if (Hide(window, f)) n++;
+        var missed = new List<string>();
+
+        // ① 精确字段
+        foreach (var f in fieldNames)
+        {
+            if (FindGo(window, f) != null)
+            {
+                if (Hide(window, f)) n++;
+            }
+            else missed.Add(f);
+        }
+
+        // ② 本窗口子树内按名兜底
+        if (missed.Count > 0)
+        {
+            try
+            {
+                foreach (var t in window.GetComponentsInChildren<Transform>(true))
+                {
+                    if (t == null || t.gameObject == window) continue;
+                    if (!missed.Contains(t.name)) continue;
+                    if (!t.gameObject.activeSelf) continue;
+                    t.gameObject.SetActive(false);
+                    n++;
+                }
+            }
+            catch { }
+        }
         return n;
     }
 }

@@ -118,6 +118,7 @@ public class Plugin : BasePlugin
                          typeof(FacilityGetOriginalWorkPosCountPatch),
                          typeof(CustomAppearancePatch),
                          typeof(FacilityWindowPatches),
+                         typeof(NativeWindowSafetyPatch),
                                               })
             {
                 try

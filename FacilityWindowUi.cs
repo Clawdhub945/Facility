@@ -99,15 +99,38 @@ internal static class FacilityWindowUi
         // 隐藏制造台专有、对我们没意义的控件（配方/材料/自动制作/制作进度）
         // 名单来自 UnityExplorer 层级快照 + 反编译字段名
         // ⚠ 名单会随窗口预制体不同而变化；新增建筑时在这里加对应字段名即可。
+        // 名单分两类：
+        //   ① 窗口类的**直接字段**（精确反射命中）
+        //   ② **嵌套物体名**（不是字段，靠 HideAll 第②阶段在本窗口子树内按名找）
+        //      如 res_grid 里的「可使用的材料:」、my_progress_make 的「建造 100%」
+        // 游戏里拼写是 fomula（少个 r），不要顺手改正。
         NativeUi.HideAll(window,
-            "formula_item_main", "formula_item_alternative",
-            "auto_make_product_of_materials", "material_settings",
-            "material_settings_grid", "tmp_product",
-            "res_grid", "my_progress_make",
-            "num_adjust_of_materials_access_range",   // 制造台的「材料取用范围」
-            "material_settings_panel", "btn_add_alternative");
+            // ① 制造台的配方 / 材料 / 自动制作
+            // 注意：游戏拼写是 fomula（少个 r）
+            "formula_item_main", "formula_item_alternative", "fomula_item_alternative",
+            "auto_make_product_of_materials",
+            "material_settings", "material_settings_grid", "material_settings_panel",
+            "tmp_product",
+            // ② 制造台专有的「可使用的材料」「建造进度」「材料取用范围」
+            // ⚠⚠ **绝对不要隐藏 omula_item_main** —— 原生下拉 dp_blueprint
+            //    就是它的子物体！隐藏它 = 下拉整个消失（实测：诊断显示
+            //    dp_blueprint activeSelf=True inHierarchy=False，
+            //    链路里 omula_item_main activeSelf=False 就是元凶，
+            //    而数据侧一直是好的：显示值=秘银矿 +10/日、选项数=4）。
+            // ⚠ 不要隐藏容器 res_grid —— 原生下拉 dp_blueprint 就挂在它下面，
+            //    隐藏容器会把下拉一起干掉（实测：下拉被填充了却看不见）。
+            //    只隐藏「可使用的材料」里的那些格子。
+            "icon_num", "icon_num_1", "icon_num_2", "icon_num_3", "icon_num_4", "icon_num_5",
+            "my_progress_make",
+            "progress_fg", "txt_progress_title", "txt_progress_state",
+            "num_adjust_of_materials_access_range",
+            "btn_add_alternative");
 
         RewriteTexts(window);
+
+        // 诊断：列出窗口一级子物体与所有被隐藏的物体（详细模式），
+        // 用来回答「下拉去哪了 / 我隐藏了什么」，不靠猜。
+        if (Plugin.VerboseEntry?.Value == true) { DumpHidden(window); DumpDropdownChain(window); }
         var coverage = FindText(window, "txt_forest_coverage_rate");
         if (coverage == null) return;
 
@@ -154,6 +177,97 @@ internal static class FacilityWindowUi
         // 用途：用户反馈「下拉框不正确 / 没有工作」时，靠这份清单精确定位
         // （是位置不对、被遮挡、还是点击没派发），不用再猜。
         if (Plugin.VerboseEntry?.Value == true) DumpWindowState(window, bar);
+    }
+
+    /// <summary>
+    /// 诊断（详细模式）：把原生下拉 `dp_blueprint` **自身的可见性链路**打出来 ——
+    /// 它以及每一级祖先的 activeSelf/activeInHierarchy/屏幕坐标。
+    ///
+    /// 为什么需要：用户反馈「下拉被填充了却看不见」。
+    /// 光看"我隐藏了哪些物体"不够（早期版本据此误判，以为没隐藏下拉就没事），
+    /// 必须直接问下拉自己：你到底是不是活的、在哪。
+    /// </summary>
+    private static void DumpDropdownChain(GameObject window)
+    {
+        try
+        {
+            var dd = NativeUi.Find<TMPro.TMP_Dropdown>(window, "dp_blueprint");
+            if (dd == null)
+            {
+                Plugin.LogV("[FacilityUI] 下拉链路: 找不到 dp_blueprint（可能被隐藏或字段取不到）");
+                return;
+            }
+            var sb = new System.Text.StringBuilder("[FacilityUI] 下拉链路（自己 → 各级祖先）:\n");
+            var cur = dd.transform;
+            int depth = 0;
+            while (cur != null && depth++ < 12)
+            {
+                var rt = cur.GetComponent<RectTransform>();
+                sb.Append("  ").Append(new string(' ', depth * 2)).Append(cur.name)
+                  .Append(" activeSelf=").Append(cur.gameObject.activeSelf)
+                  .Append(" inHierarchy=").Append(cur.gameObject.activeInHierarchy);
+                if (rt != null)
+                {
+                    sb.Append(" screen=").Append(rt.position.x.ToString("0")).Append(',')
+                      .Append(rt.position.y.ToString("0"))
+                      .Append(" size=").Append(rt.rect.width.ToString("0")).Append('x')
+                      .Append(rt.rect.height.ToString("0"));
+                }
+                sb.Append(cur.gameObject == window ? "   ← 窗口根" : "").Append('\n');
+                if (cur.gameObject == window) break;
+                cur = cur.parent;
+            }
+            // 下拉自身的显示值 + 选项数，确认数据侧是好的
+            string shown = "?";
+            try { shown = dd.captionText != null ? dd.captionText.text : "(captionText=null)"; } catch { }
+            int optCount = 0;
+            try { optCount = dd.options.Count; } catch { }
+            sb.Append("  显示值=").Append(shown).Append("  选项数=").Append(optCount).Append('\n');
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 下拉链路诊断失败: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 诊断（详细模式）：列出窗口一级子物体（名字/是否可见）+ 所有被隐藏的物体路径。
+    /// 用来回答「下拉去哪了 / 我隐藏了什么」这类问题，避免再靠猜。
+    /// 踩过的坑：把下拉的**祖先**隐藏了，导致原生下拉整个消失。
+    /// </summary>
+    private static void DumpHidden(GameObject window)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder("[FacilityUI] 窗口一级子物体:\n");
+            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t.parent != window.transform) continue;
+                sb.Append("  ").Append(t.name)
+                  .Append(t.gameObject.activeSelf ? " [显示]" : " [已隐藏]").Append('\n');
+            }
+            sb.Append("[FacilityUI] 被隐藏的物体:\n");
+            int n = 0;
+            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t.gameObject == window) continue;
+                if (t.gameObject.activeSelf) continue;
+                // 祖先已经隐藏的不重复列（避免一列一大片）
+                if (t.parent != null && !t.parent.gameObject.activeSelf) continue;
+                sb.Append("  ").Append(DiagPathOf(t, window.transform)).Append('\n');
+                if (++n > 40) break;
+            }
+            if (n == 0) sb.Append("  (无)\n");
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] DumpHidden 失败: {ex.Message}"); }
+    }
+
+    /// <summary>取相对路径（诊断用）</summary>
+    private static string DiagPathOf(Transform t, Transform root)
+    {
+        var parts = new System.Collections.Generic.List<string>();
+        var cur = t;
+        while (cur != null && cur != root) { parts.Insert(0, cur.name); cur = cur.parent; }
+        return string.Join("/", parts);
     }
 
     /// <summary>诊断：把窗口控件的实际坐标与下拉框状态打一行（仅详细模式）</summary>
@@ -233,6 +347,9 @@ internal static class FacilityWindowUi
     ///   2. 窗口上 `facility_guid` 命中本 mod 建筑      → true
     ///   3. 都取不到                                    → **false（不动它）**
     /// </summary>
+    /// <summary>供安全护栏补丁复用（判断窗口是否属于本 mod 建筑）</summary>
+    internal static bool IsOurWindowPublic(GameObject window) => IsOurWindow(window);
+
     private static bool IsOurWindow(GameObject window)
     {
         try
