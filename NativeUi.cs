@@ -26,12 +26,23 @@ namespace FacilityMod;
 /// </summary>
 internal static class NativeUi
 {
-    /// <summary>从窗口对象上按字段名取值（先找自身组件，再找子物体同名物体）</summary>
-    internal static object? FindRaw(GameObject window, string fieldName)
+    /// <summary>
+    /// 从窗口对象上按字段名取值。
+    ///
+    /// ⚠ `byNameFallback` 默认 **false**：
+    /// 按「物体名」搜整个层级会**误伤原版窗口** —— 我们的建筑(105050) 和制造台(105010)
+    /// 共用 `window_blacksmith`，制造台窗口里也有 `res_grid` / `my_progress_make` /
+    /// `num_adjust_of_materials_access_range` 这些同名物体，一旦按名字搜到就会把它们隐藏，
+    /// 用户实测：制造台的**材料需求图标、「进度 0%」、「材料取用范围 50」的数字全部消失**。
+    ///
+    /// 所以默认只走**正规路径**（反射窗口自身的 `[SerializeField]` 字段，只命中该窗口类型
+    /// 真正持有的控件）；只有明确知道自己在做什么（如诊断）才开 fallback。
+    /// </summary>
+    internal static object? FindRaw(GameObject window, string fieldName, bool byNameFallback = false)
     {
         if (window == null || string.IsNullOrEmpty(fieldName)) return null;
 
-        // ① 从窗口自身的 MonoBehaviour 上按字段名反射（游戏的正规做法）
+        // ① 从窗口自身的 MonoBehaviour 上按字段名反射（游戏的正规做法，最安全）
         try
         {
             foreach (var c in window.GetComponents<Component>())
@@ -43,25 +54,29 @@ internal static class NativeUi
         }
         catch { }
 
-        // ② 兜底：按**物体名**找（层级快照里的名字一般与字段名一致）
-        try
+        // ② 可选兜底：按**物体名**找（默认关闭，见上面的警告）
+        if (byNameFallback)
         {
-            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            try
             {
-                if (t != null && t.name == fieldName) return t.gameObject;
+                foreach (var t in window.GetComponentsInChildren<Transform>(true))
+                {
+                    if (t != null && t.name == fieldName) return t.gameObject;
+                }
             }
+            catch { }
         }
-        catch { }
 
         return null;
     }
 
     /// <summary>按字段名取指定类型的控件（取不到返回 null）</summary>
-    internal static T? Find<T>(GameObject window, string fieldName) where T : Component
+    internal static T? Find<T>(GameObject window, string fieldName, bool byNameFallback = false)
+        where T : Component
     {
         try
         {
-            var v = FindRaw(window, fieldName);
+            var v = FindRaw(window, fieldName, byNameFallback);
             switch (v)
             {
                 case T hit:
@@ -77,11 +92,11 @@ internal static class NativeUi
     }
 
     /// <summary>按字段名取控件所在的 GameObject</summary>
-    internal static GameObject? FindGo(GameObject window, string fieldName)
+    internal static GameObject? FindGo(GameObject window, string fieldName, bool byNameFallback = false)
     {
         try
         {
-            var v = FindRaw(window, fieldName);
+            var v = FindRaw(window, fieldName, byNameFallback);
             return v switch
             {
                 GameObject go => go,

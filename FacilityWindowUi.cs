@@ -219,9 +219,19 @@ internal static class FacilityWindowUi
     }
 
     /// <summary>
-    /// 这个窗口是不是绑在本 mod 的设施上。
-    /// 先看窗口上的 `stuff_id` / `facility_guid` 字段（interop 里确实有这两个字段），
-    /// 拿不到字段就退一步：看本 mod 建筑里有没有 guid 与之匹配的。
+    /// 这个窗口是不是绑在**本 mod 的设施**上。
+    ///
+    /// ⚠⚠ 必须**判不出来就返回 false**（fail-safe）。
+    /// 血泪教训：早期版本取不到 `stuff_id` 字段时直接 `return true`（想着「宁可多改」），
+    /// 结果**把游戏原版制造台的窗口也改了** —— 用户实测截图对比：材料需求图标与
+    /// 「进度 0%」整块消失、「材料取用范围 50」的数字没了。
+    /// 原因是我们的建筑(105050) 和制造台(105010) 用**同一个** `window_prefab`
+    /// （`window_blacksmith`），组件类型相同，**只有 `stuff_id` / `facility_guid` 能区分**。
+    ///
+    /// 判据顺序：
+    ///   1. 窗口上 `stuff_id` == 本 mod 设施 id        → true
+    ///   2. 窗口上 `facility_guid` 命中本 mod 建筑      → true
+    ///   3. 都取不到                                    → **false（不动它）**
     /// </summary>
     private static bool IsOurWindow(GameObject window)
     {
@@ -230,33 +240,109 @@ internal static class FacilityWindowUi
             foreach (var c in window.GetComponents<Component>())
             {
                 if (c == null) continue;
-                var t = c.GetType();
-                // stuff_id 直接可读时最省事
-                var pi = t.GetProperty("stuff_id");
-                if (pi != null)
+
+                var sid = ReadInt(c, "stuff_id");
+                if (sid.HasValue && sid.Value != 0)
                 {
-                    try
-                    {
-                        var v = pi.GetValue(c);
-                        if (v is int sid && sid != 0) return Plugin.IsManaged(sid);
-                    }
-                    catch { }
+                    bool ours = Plugin.IsManaged(sid.Value);
+                    LogOwnershipOnce($"stuff_id={sid.Value}", ours);
+                    return ours;
                 }
-                var fi = t.GetField("stuff_id");
-                if (fi != null)
+
+                var g = ReadInt(c, "facility_guid");
+                if (g.HasValue && g.Value != 0)
                 {
-                    try
-                    {
-                        var v = fi.GetValue(c);
-                        if (v is int sid2 && sid2 != 0) return Plugin.IsManaged(sid2);
-                    }
-                    catch { }
+                    bool ours = IsManagedGuid(g.Value);
+                    LogOwnershipOnce($"facility_guid={g.Value}", ours);
+                    return ours;
                 }
             }
         }
         catch { }
-        // 字段都拿不到就**放行**（宁可多改，也别让我们的窗口没下拉框）
-        return true;
+
+        // 判不出来就不动：宁可我们的窗口少改一点，也绝不能破坏原版窗口
+        LogOwnershipOnce("取不到 stuff_id/facility_guid", false);
+        return false;
+    }
+
+    /// <summary>归属判断的日志只打一次（同窗口同结果重复打会刷屏）</summary>
+    private static void LogOwnershipOnce(string key, bool ours)
+    {
+        if (_lastOwnershipKey == key && _lastOwnershipOurs == ours) return;
+        _lastOwnershipKey = key;
+        _lastOwnershipOurs = ours;
+        Plugin.LogV($"[FacilityUI] 归属判断: {key} → {(ours ? "我们的" : "原版的（不动）")}");
+    }
+
+    private static string _lastOwnershipKey = "";
+    private static bool _lastOwnershipOurs;
+
+    /// <summary>
+    /// 这个 guid 是不是本 mod 建出来的设施。
+    ///
+    /// ⚠ 必须带缓存：窗口开着时 `Apply` **每帧**都会被调，
+    /// 不能每帧 `FindObjectsOfType` 扫场景（性能与日志都会爆）。
+    /// 缓存由 `FacilityComponent` 的每帧循环维护（新建/拆除/换档时置脏重建）。
+    /// </summary>
+    private static bool IsManagedGuid(int guid)
+    {
+        if (_managedGuidsStale
+            || Time.frameCount - _managedGuidsFrame > 180)   // 兜底：最长 3 秒重建一次
+        {
+            CacheManagedGuids();
+        }
+        return _managedGuids.Contains(guid);
+    }
+
+    private static readonly HashSet<int> _managedGuids = new();
+    private static bool _managedGuidsStale = true;
+    private static int _managedGuidsFrame = -999;
+
+    /// <summary>重建「本 mod 建筑 guid」缓存（换档/新建/拆除后由主循环置脏）</summary>
+    internal static void CacheManagedGuids()
+    {
+        try
+        {
+            _managedGuids.Clear();
+            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            {
+                if (f == null) continue;
+                int sid = 0, g = 0;
+                try { sid = f.stuff_id; } catch { }
+                if (!Plugin.IsManaged(sid)) continue;
+                try { g = f.guid; } catch { }
+                if (g != 0) _managedGuids.Add(g);
+            }
+        }
+        catch { }
+        _managedGuidsStale = false;
+        _managedGuidsFrame = Time.frameCount;
+        Plugin.LogV($"[FacilityUI] 本 mod 建筑 guid 缓存已更新：{_managedGuids.Count} 座");
+    }
+
+    /// <summary>标脏：下次判断时重建缓存</summary>
+    internal static void InvalidateManagedGuids() => _managedGuidsStale = true;
+
+    /// <summary>从对象上读一个 int 字段/属性（取不到返回 null）</summary>
+    private static int? ReadInt(object target, string name)
+    {
+        const System.Reflection.BindingFlags F =
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Instance;
+        var t = target.GetType();
+        try
+        {
+            var fi = t.GetField(name, F) ?? t.GetField(name + "_", F);
+            if (fi != null) return System.Convert.ToInt32(fi.GetValue(target));
+        }
+        catch { }
+        try
+        {
+            var pi = t.GetProperty(name, F) ?? t.GetProperty(name + "_", F);
+            if (pi != null && pi.CanRead) return System.Convert.ToInt32(pi.GetValue(target));
+        }
+        catch { }
+        return null;
     }
 
     /// <summary>把候选列表的位置/尺寸对齐到当前标题条（每帧调用，防止窗口移动后列表飘走）</summary>
@@ -582,43 +668,60 @@ internal static class FacilityWindowUi
     }
 
     /// <summary>
-    /// 自动化测试钩子（F10）：打开本 mod 建筑的窗口。
-    /// 用途：无人值守测试里 OS 级鼠标点击标定很脆（分辨率会变），
-    /// 直接调游戏的选建筑逻辑最稳 —— 有了窗口才能验证原生下拉。
+    /// 自动化测试钩子（F10）：打开窗口。
+    /// 默认开**本 mod 建筑**的窗口；如果场景里有**原版制造台**，先用一次开制造台 ——
+    /// 用来回归验证「制造台窗口没有被我们改坏」（用户实测报过：材料需求/进度/
+    /// 材料取用范围被隐藏）。
     /// </summary>
     internal static void TestOpenWindow()
     {
         try
         {
+            // ① 先试原版制造台（105010）：确认归属判断会拒绝它
+            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            {
+                if (f == null) continue;
+                int sid = 0;
+                try { sid = f.stuff_id; } catch { }
+                if (sid != 105010) continue;                       // 原版制造台
+                Plugin.LogV("[FacilityUI] F10 先开原版制造台窗口（回归验证用）");
+                if (TryShowWindow(f)) return;
+            }
+
+            // ② 再开我们的建筑
             foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
             {
                 if (f == null) continue;
                 int sid = 0;
                 try { sid = f.stuff_id; } catch { }
                 if (!Plugin.IsManaged(sid)) continue;
-
-                // 游戏选建筑的入口在 Facility 的点击逻辑里，名字见反编译：
-                // Item3dClickable 派生类都有 OnClick/ShowWindow 之类；这里用最通用的
-                // 「选中 + 打开窗口」组合，逐个试，成功即返回。
-                Plugin.LogV($"[FacilityUI] F10 打开窗口尝试：guid={(SafeGuid(f))} sid={sid}");
-                try
-                {
-                    var m = AccessTools.Method(f.GetType(), "ShowWindow")
-                            ?? AccessTools.Method(f.GetType(), "OpenWindow")
-                            ?? AccessTools.Method(f.GetType(), "OnClick")
-                            ?? AccessTools.Method(f.GetType(), "OnSelected");
-                    if (m != null && m.GetParameters().Length == 0)
-                    {
-                        m.Invoke(f, null);
-                        Plugin.LogV($"[FacilityUI] F10 调用 {m.Name}() 成功");
-                        return;
-                    }
-                }
-                catch (Exception ex) { Plugin.LogV($"[FacilityUI] F10 调用异常: {ex.Message}"); }
+                Plugin.LogV($"[FacilityUI] F10 打开窗口尝试：guid={SafeGuid(f)} sid={sid}");
+                if (TryShowWindow(f)) return;
             }
-            Plugin.LogV("[FacilityUI] F10：没找到可调用开窗方法的建筑");
+            Plugin.LogV("[FacilityUI] F10：没找到可开窗的建筑");
         }
         catch (Exception ex) { Plugin.LogV($"[FacilityUI] F10 失败: {ex.Message}"); }
+    }
+
+    /// <summary>调游戏的 ShowWindow/OpenWindow/OnClick（按名字找，找到就调）</summary>
+    private static bool TryShowWindow(Facility f)
+    {
+        try
+        {
+            var m = AccessTools.Method(f.GetType(), "ShowWindow")
+                    ?? AccessTools.Method(f.GetType(), "OpenWindow")
+                    ?? AccessTools.Method(f.GetType(), "OnClick")
+                    ?? AccessTools.Method(f.GetType(), "OnSelected");
+            if (m == null || m.GetParameters().Length != 0) return false;
+            m.Invoke(f, null);
+            Plugin.LogV($"[FacilityUI] F10 调用 {m.Name}() 成功");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogV($"[FacilityUI] F10 调用异常: {ex.Message}");
+            return false;
+        }
     }
 
     private static int SafeGuid(Facility f)

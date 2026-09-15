@@ -1,0 +1,33 @@
+<ModImages version="1">
+
+  <Image
+      file="super_factory_0.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="super_factory_1.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="super_factory_2.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="super_factory_3.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="ui_105050.png"
+      action="add"
+      anchor="0.5,0.5"
+      />
+
+</ModImages>
