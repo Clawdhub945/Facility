@@ -465,7 +465,15 @@ internal static class CustomSprite
                 // 也可能带着我们的名字但不是同一个 guid。这里放宽为：
                 //   本建筑(105050) 或 「名字里带我们外观名」
                 bool isOurs = false;
-                try { isOurs = f.stuff_id == TargetStuffId; } catch { }
+                // ① 规格里声明了自定义外观的建筑（**按规格分派**，不再硬编码某一个 id）
+                try
+                {
+                    int sid = f.stuff_id;
+                    var spec = Buildings.ByStuffId(sid);
+                    isOurs = spec?.CustomSpritePrefix != null;
+                }
+                catch { }
+                // ② 兼容旧判据 + 覆盖「移动预览体」：名字里带我们外观名/自建渲染器名
                 if (!isOurs)
                 {
                     try
@@ -583,7 +591,9 @@ internal static class CustomAppearancePatch
     {
         try
         {
-            if (stuff_id != CustomSprite.TargetStuffId) return;
+            // 只有规格里声明了自定义外观的建筑才换图（**按规格分派**，不硬编码 id）
+            var spec = Buildings.ByStuffId(stuff_id);
+            if (spec?.CustomSpritePrefix == null) return;
             CustomSprite.ApplyAppearance(__result, rotation);
         }
         catch (Exception ex) { Plugin.LogError($"[Facility] 外观补丁异常: {ex}"); }

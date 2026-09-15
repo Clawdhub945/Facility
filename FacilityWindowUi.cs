@@ -83,33 +83,73 @@ internal static class FacilityWindowUi
     }
 
 
-    /// <summary>窗口每次打开/刷新后调用：确保下拉框存在并就位，改写文案。</summary>
+    /// <summary>
+    /// 窗口事件总入口 —— **只负责分派**：先判定这个窗口属于哪座建筑，
+    /// 再**只执行那座建筑的规格**（`BuildingSpec`）。
+    ///
+    /// ## 为什么改成这样（架构重构）
+    /// 早期版本所有建筑共用一套 `Apply` 逻辑 + 一套隐藏名单 + 一个全局开关，
+    /// 结果「改下拉框 → 高炉也跟着变」「改高炉 → 另两座也不产了」。
+    /// 用户明确要求**每种建筑独立存在**，所以：
+    ///   * 归属判定 → 拿到 `BuildingSpec`
+    ///   * 之后每个动作都先看**该建筑自己的规格**（要不要填下拉 / 隐藏什么 / 改不改文案）
+    ///   * 任何一座建筑的规格变化，**不会**影响其他建筑
+    /// </summary>
     internal static void Apply(GameObject window)
     {
         if (window == null) return;
 
-        // 归属判断：只给「本 mod 的设施」改窗口。
-        // 采集营地(105006) 等原版设施用的是同一个窗口预制体，不判归属会把它们的窗口也改掉
-        // （用户实测反馈「点建造开后里面的部分 UI 不对」时，很可能就是别的设施窗口被我们动过）。
-        if (!IsOurWindow(window)) return;
+        int guid = ReadWindowFacilityGuid(window);
+        BuildingSpec? spec = guid != 0 ? SpecByGuid(guid) : null;
 
-        // 原生下拉：填我们的额外产品候选（window_blacksmith 的 dp_blueprint）
-        NativeDropdown.Refresh(window);
+        if (Plugin.VerboseEntry?.Value == true)
+        {
+            try
+            {
+                string key = window.name + "|" + guid + "|" + (spec?.Name ?? "原版");
+                if (key != _lastApplyKey)
+                {
+                    _lastApplyKey = key;
+                    Plugin.LogV($"[FacilityUI] Apply 窗口 {window.name} facility_guid={guid}" +
+                                $" → {(spec == null ? "原版的，不改" : $"建筑「{spec.Name}」，按其规格处理")}");
+                }
+            }
+            catch { }
+        }
+        if (Plugin.VerboseEntry?.Value == true) DumpBoundFacility(window);
 
-        // 隐藏制造台专有、对我们没意义的控件（配方/材料/自动制作/制作进度）
-        // 名单来自 UnityExplorer 层级快照 + 反编译字段名
-        // ⚠ 名单会随窗口预制体不同而变化；新增建筑时在这里加对应字段名即可。
-        // ⚠ 隐藏名单**按窗口类型分派** —— 一套通用名单会把熔炉窗口自己的控件也隐藏掉
-        //   （实测：熔炉的关闭/派工按钮、材料取用范围数字、进度、工作模式全消失）。
-        //   详见 HideListFor 的注释。
-        NativeUi.HideAll(window, HideListFor(window));
+        // 不是本 mod 的建筑 → 一律不碰（fail-safe）
+        if (spec == null) return;
+
+        // ① 按**该建筑自己的规格**隐藏控件 —— 只在**首次**处理这个窗口时做一次。
+        //
+        // 为什么只做一次：
+        //   * Apply 被窗口刷新方法每帧调用，而 HideAll 内部有反射扫描 + 层级遍历，每帧跑很浪费
+        //   * 反复隐藏同一个物体也没意义。用「已处理标记」平衡：
+        //     窗口关闭时标记随物体一起销毁，下次开窗会重新处理。
+        if (!IsProcessed(window))
+        {
+            int hidden = NativeUi.HideAll(window, spec.HideControls);
+            MarkProcessed(window);
+            Plugin.LogV($"[FacilityUI] 建筑「{spec.Name}」窗口 {window.name}" +
+                        $" → 隐名单 {spec.HideControls.Length} 项，实际隐藏 {hidden} 个");
+        }
+
+        // ② 按规格决定要不要往原生下拉里填候选
+        if (spec.FillExtraProductDropdown) NativeDropdown.Refresh(window);
 
 
-        RewriteTexts(window);
+        // ③ 按规格决定要不要改写文案（熔炉窗口不改 —— 它的文案是游戏自己的）
+        if (spec.RewriteWindowTexts) RewriteTexts(window);
 
         // 诊断：列出窗口一级子物体与所有被隐藏的物体（详细模式），
         // 用来回答「下拉去哪了 / 我隐藏了什么」，不靠猜。
         if (Plugin.VerboseEntry?.Value == true) { DumpHidden(window); DumpDropdownChain(window); }
+
+        // ④ 自绘选择条：**只在没有原生下拉的建筑上才用**（保底方案）。
+        //   有原生下拉（FillExtraProductDropdown）的建筑不该再画一条，否则两套 UI 打架。
+        if (spec.FillExtraProductDropdown) return;
+
         var coverage = FindText(window, "txt_forest_coverage_rate");
         if (coverage == null) return;
 
@@ -331,39 +371,41 @@ internal static class FacilityWindowUi
     ///
     /// ## 为什么必须区分窗口类型（血泪教训）
     /// 早期版本用**一套通用名单**（`icon_num` / `my_progress_make` / `res_grid` …），
-    /// 结果用到熔炉窗口（`window_furnace`）时，把这些名字在熔炉里**同样存在**的控件也隐藏了 ——
-    /// 用户实测：熔炉的关闭按钮 / 派工按钮 / 材料取用范围数字 / 进度 / 工作模式下拉**全部消失**，
-    /// 整个 UI 变成「全是默认值且无法交互」。
+    /// 结果用到熔炉窗口（`window_furnace`）时，把这些名字在熔炉里**同样存在**的控件也隐藏了。
     ///
-    /// **规矩**：按物体名隐藏时，名单必须与窗口类型绑定；跨窗口重名的通用名
-    /// （`icon_num*` / `res_grid` / `my_progress_make` / `num_adjust*`）**绝不能**放进通用名单。
+    /// ## ⚠⚠ 分派判据只能用**窗口名**，不能用组件类型
+    /// 诊断实证（`[FacilityUI] 窗口 window_furnace（组件: … WindowWorkshop …）`）：
+    /// **`window_furnace` 上也挂着 `WindowWorkshop` 组件** ——
+    /// `WindowFurnace` 大概是 `WindowWorkshop` 的派生类，所以「按组件类型分派」会失效，
+    /// 熔炉也吃到制造台名单（实测：隐名单 16 项）。
+    /// 正确判据：**`window.name`**（`window_blacksmith` / `window_workshop` / `window_furnace` …）。
     ///
-    /// 另外：「进度」与「材料取用范围」是用户**明确要求保留/实现**的功能，
-    /// 任何名单里都不该出现它们。
+    /// ## ⚠⚠ `fomula_item_main` **绝不能进名单**（这个坑踩了两次）
+    /// 它是原生下拉 `dp_blueprint` 的**父容器**。隐藏它 → 下拉看不见：
+    /// 诊断显示 `dp_blueprint activeSelf=True inHierarchy=False`，
+    /// 祖先 `fomula_item_main activeSelf=False` → 用户看到「下拉消失」。
+    /// 同理「进度」`my_progress_make` 与「材料取用范围」是用户要求保留/实现的功能，也不该隐藏。
     /// </summary>
     private static string[] HideListFor(GameObject window)
     {
-        // 制造台系（window_blacksmith / window_workshop）：只隐藏「工坊配方」专有的那些
-        if (HasComponentNamed(window, "WindowWorkshop"))
-        {
-            return new[]
-            {
-                "formula_item_main", "formula_item_alternative",
-                "fomula_item_main", "fomula_item_alternative",   // 游戏里拼写是 fomula
-                "auto_make_product_of_materials",
-                "material_settings", "material_settings_grid", "material_settings_panel",
-                "tmp_product",
-                "btn_add_alternative",
-                // 「可使用的材料」里的格子。**只隐藏格子，不隐藏容器 res_grid** ——
-                // 原生下拉 dp_blueprint 可能挂在容器下面（踩过：隐藏容器 → 下拉消失）。
-                "icon_num", "icon_num_1", "icon_num_2", "icon_num_3",
-                "icon_num_4", "icon_num_5",
-            };
-        }
+        string n = "";
+        try { n = window.name ?? ""; } catch { }
 
-        // 熔炉系（window_furnace）：**什么都不隐藏** —— 每一样控件都有用
-        // （焚烧回收列表、燃料设置、材料取用范围、进度、工作模式）
-        return Array.Empty<string>();
+        // 只有制造台系窗口才隐藏「工坊配方」专有的那些
+        if (n != "window_blacksmith" && n != "window_workshop") return Array.Empty<string>();
+
+        return new[]
+        {
+            "formula_item_alternative", "fomula_item_alternative",   // 游戏里拼写是 fomula
+            "auto_make_product_of_materials",
+            "material_settings", "material_settings_grid", "material_settings_panel",
+            "tmp_product",
+            "btn_add_alternative",
+            // 「可使用的材料」里的格子。**只隐藏格子，不隐藏容器 `res_grid`** ——
+            // 原生下拉 dp_blueprint 可能挂在容器下面。
+            "icon_num", "icon_num_1", "icon_num_2", "icon_num_3",
+            "icon_num_4", "icon_num_5",
+        };
     }
 
     /// <summary>窗口上有没有指定名字的组件（用来认窗口类型）</summary>
@@ -378,6 +420,154 @@ internal static class FacilityWindowUi
         }
         catch { }
         return false;
+    }
+
+    /// <summary>
+    /// 诊断（详细模式）：读出窗口上绑定的设施对象字段（`furnace` / `workshop` / `facility` …）
+    /// 是否为 null。
+    ///
+    /// 用途：`WindowWorkshop.SetInfo` 在 `this.workshop == null` 时会抛空引用并**中途中断**，
+    /// 窗口就停在默认值、回调没接上（用户描述为「全是默认值且无法交互」）。
+    /// 读这些字段能直接判定是不是「设施类型与窗口机制不匹配」。
+    /// </summary>
+    private static void DumpBoundFacility(GameObject window)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder($"[FacilityUI] 窗口 {window.name} 绑定的设施字段:\n");
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                var t = c.GetType();
+                if (t.Name == "RectTransform" || t.Name == "Transform") continue;
+                sb.Append("  组件 ").Append(t.Name).Append(": ");
+                bool any = false;
+                foreach (var fname in new[] { "facility", "furnace", "workshop", "stuff_id", "facility_guid" })
+                {
+                    object? v = null;
+                    try
+                    {
+                        var pi = t.GetProperty(fname);
+                        if (pi != null) v = pi.GetValue(c);
+                        if (v == null)
+                        {
+                            var fi = t.GetField(fname);
+                            if (fi != null) v = fi.GetValue(c);
+                        }
+                    }
+                    catch { }
+                    if (v == null) continue;
+                    any = true;
+                    string vs = v is UnityEngine.Object uo
+                        ? (uo == null ? "null" : uo.GetType().Name)
+                        : v.ToString() ?? "?";
+                    sb.Append(fname).Append('=').Append(vs).Append(' ');
+                }
+                if (!any) sb.Append("(无相关字段)");
+                sb.Append('\n');
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] DumpBoundFacility 失败: {ex.Message}"); }
+    }
+
+    /// <summary>窗口是否已经按规格处理过（用实例 ID 做标记，窗口销毁即失效）</summary>
+    private static readonly System.Collections.Generic.HashSet<int> _processedWindows = new();
+
+    private static bool IsProcessed(GameObject window)
+    {
+        try { return _processedWindows.Contains(window.GetInstanceID()); }
+        catch { return false; }
+    }
+
+    private static void MarkProcessed(GameObject window)
+    {
+        try
+        {
+            // 标记集合会随窗口开关增长 —— 定期把已销毁的实例清掉
+            if (_processedWindows.Count > 64)
+            {
+                var alive = new System.Collections.Generic.HashSet<int>();
+                foreach (var w in UnityEngine.Object.FindObjectsOfType<Transform>())
+                {
+                    if (w == null) continue;
+                    int id = w.gameObject.GetInstanceID();
+                    if (_processedWindows.Contains(id)) alive.Add(id);
+                }
+                _processedWindows.Clear();
+                foreach (var id in alive) _processedWindows.Add(id);
+            }
+            _processedWindows.Add(window.GetInstanceID());
+        }
+        catch { }
+    }
+
+    /// <summary>读窗口上绑定的 `facility_guid`（读不到返回 0）</summary>
+    private static int ReadWindowFacilityGuid(GameObject window)
+    {
+        try
+        {
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                var g = ReadInt(c, "facility_guid");
+                if (g.HasValue && g.Value != 0) return g.Value;
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    /// <summary>
+    /// 由设施 guid 找到它对应的**建筑规格**。
+    /// 做法：先按 guid 找到场景里的设施对象取 `stuff_id`，再查规格表。
+    /// 结果缓存（guid → 规格），避免每帧扫场景。
+    /// </summary>
+    private static BuildingSpec? SpecByGuid(int guid)
+    {
+        if (_specByGuid.TryGetValue(guid, out var cached)) return cached;
+
+        int stuffId = 0;
+        try
+        {
+            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            {
+                if (f == null) continue;
+                int g = 0;
+                try { g = f.guid; } catch { }
+                if (g != guid) continue;
+                try { stuffId = f.stuff_id; } catch { }
+                break;
+            }
+        }
+        catch { }
+
+        var spec = stuffId != 0 ? Buildings.ByStuffId(stuffId) : null;
+        _specByGuid[guid] = spec;
+        if (spec != null) Plugin.LogV($"[FacilityUI] guid={guid} 归属建筑「{spec.Name}」（stuff_id={stuffId}）");
+        return spec;
+    }
+
+    /// <summary>guid → 建筑规格 的缓存（拆除/换档时由 InvalidateManagedGuids 一起清）</summary>
+    private static readonly System.Collections.Generic.Dictionary<int, BuildingSpec?> _specByGuid = new();
+
+    private static string _lastApplyKey = "";
+
+    /// <summary>窗口上挂的组件名清单（诊断用，用来确认窗口类型判断对不对）</summary>
+    private static string ComponentNames(GameObject window)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                if (sb.Length > 0) sb.Append(", ");
+                sb.Append(c.GetType().Name);
+            }
+            return sb.ToString();
+        }
+        catch { return "?"; }
     }
 
     /// <summary>供安全护栏补丁复用（判断窗口是否属于本 mod 建筑）</summary>
@@ -467,6 +657,7 @@ internal static class FacilityWindowUi
         catch { }
         _managedGuidsStale = false;
         _managedGuidsFrame = Time.frameCount;
+        _specByGuid.Clear();   // 换档/拆迁后规格缓存也要失效
         Plugin.LogV($"[FacilityUI] 本 mod 建筑 guid 缓存已更新：{_managedGuids.Count} 座");
     }
 

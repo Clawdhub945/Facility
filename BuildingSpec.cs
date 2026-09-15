@@ -1,0 +1,140 @@
+using System;
+using System.Collections.Generic;
+
+namespace FacilityMod;
+
+/// <summary>
+/// 一座自定义建筑的**完整独立规格**。
+///
+/// ## 为什么要有这个（架构重构的原因）
+/// 早期版本把三座建筑的行为混在几条共用路径里：
+///   * 窗口补丁一张大网网住所有窗口类 → 改下拉框，高炉也跟着变
+///   * `FacilityWindowUi.Apply()` 一套逻辑处理所有建筑 → 隐藏名单互相污染
+///   * 产出循环用全局判据筛建筑 → 改「高炉不产木石」，别的建筑也停摆
+///
+/// 用户明确要求：**每种建筑必须独立存在**。于是把「一座建筑是什么、要做什么」
+/// 全部收进这个规格对象，所有代码路径都**按规格分派**，不再有跨建筑共享的行为开关。
+///
+/// ## 加一座新建筑要改哪里
+/// 1. 在 <see cref="Buildings"/> 里加一条规格
+/// 2. `_tools/make_defs.py` 里加对应的 Def 表行
+/// 除此之外**不需要动任何逻辑代码** —— 这是这套规格存在的意义。
+/// </summary>
+internal sealed class BuildingSpec
+{
+    /// <summary>设施 id（与 Defs 表一致）</summary>
+    internal int StuffId { get; init; }
+
+    /// <summary>显示名（日志用）</summary>
+    internal string Name { get; init; } = "";
+
+    /// <summary>这个建筑的窗口预制体名（`window_gatherers_hut` / `window_blacksmith` / `window_furnace` …）</summary>
+    internal string WindowPrefab { get; init; } = "";
+
+    /// <summary>
+    /// 是否参与本 mod 的「每日产出」逻辑（工人数 × cfg 产出表）。
+    /// **只有日常产出型建筑才为 true**；熔炉那种走游戏自己机制的不参与。
+    /// </summary>
+    internal bool DailyProducer { get; init; }
+
+    /// <summary>
+    /// 窗布里要**隐藏**的控件名（**只对这座建筑的窗口生效**）。
+    /// ⚠ 绝不能放跨窗口重名的通用名（`icon_num` / `res_grid` / `my_progress_make` …）——
+    /// 也别放 `fomula_item_main`（原生下拉的父容器，隐藏它下拉就没了）。
+    /// </summary>
+    internal string[] HideControls { get; init; } = Array.Empty<string>();
+
+    /// <summary>是否往窗口的**原生下拉**里填「额外产品」候选（只有带 `dp_blueprint` 的窗口才需要）</summary>
+    internal bool FillExtraProductDropdown { get; init; }
+
+    /// <summary>是否改写窗口文案（标题/说明/森林覆盖率等）</summary>
+    internal bool RewriteWindowTexts { get; init; } = true;
+
+    /// <summary>自定义外观（贴图前缀）；null = 用原版外观</summary>
+    internal string? CustomSpritePrefix { get; init; }
+}
+
+/// <summary>本 mod 全部建筑的规格表（**唯一事实来源**）</summary>
+internal static class Buildings
+{
+    /// <summary>综合生产所：日常产出型，原生窗口，不改外观</summary>
+    internal static readonly BuildingSpec Producer = new()
+    {
+        StuffId = Plugin.FacilityId,                 // 105040
+        Name = "综合生产所",
+        WindowPrefab = "window_gatherers_hut",
+        DailyProducer = true,
+        FillExtraProductDropdown = false,            // 该窗口没有原生下拉
+        HideControls = Array.Empty<string>(),        // 采集营地窗口本来就是我们要的样子
+        RewriteWindowTexts = true,
+    };
+
+    /// <summary>超级生产所：日常产出型 + 自定义外观 + 借 window_blacksmith 拿原生下拉</summary>
+    internal static readonly BuildingSpec SuperProducer = new()
+    {
+        StuffId = Plugin.SuperFacilityId,            // 105050
+        Name = "超级生产所",
+        WindowPrefab = "window_blacksmith",
+        DailyProducer = true,
+        FillExtraProductDropdown = true,
+        // ⚠ 只隐藏「工坊配方」专有的东西；**不能有** fomula_item_main（下拉父容器）
+        HideControls = new[]
+        {
+            "formula_item_alternative", "fomula_item_alternative",
+            "auto_make_product_of_materials",
+            "material_settings", "material_settings_grid", "material_settings_panel",
+            "tmp_product", "btn_add_alternative",
+            "icon_num", "icon_num_1", "icon_num_2", "icon_num_3", "icon_num_4", "icon_num_5",
+        },
+        RewriteWindowTexts = true,
+        CustomSpritePrefix = "super_factory",
+    };
+
+    /// <summary>
+    /// 三乘三高炉实验：走**游戏自己的熔炉机制**（燃料 + 生产计划），
+    /// 所以**不参与**本 mod 的每日产出；窗口**一个控件都不隐藏**、不改文案。
+    /// </summary>
+    internal static readonly BuildingSpec Furnace3Test = new()
+    {
+        StuffId = Plugin.Furnace3TestId,             // 105051
+        Name = "三乘三高炉实验",
+        WindowPrefab = "window_furnace",
+        DailyProducer = false,                       // ← 关键：不参与本 mod 产出
+        FillExtraProductDropdown = false,
+        HideControls = Array.Empty<string>(),        // ← 关键：熔炉窗口一个都不隐藏
+        RewriteWindowTexts = false,                  // ← 关键：不碰它的文案
+        CustomSpritePrefix = null,
+    };
+
+    internal static readonly BuildingSpec[] All = { Producer, SuperProducer, Furnace3Test };
+
+    /// <summary>本 mod 全部设施 id</summary>
+    internal static int[] AllIds()
+    {
+        var ids = new int[All.Length];
+        for (int i = 0; i < All.Length; i++) ids[i] = All[i].StuffId;
+        return ids;
+    }
+
+    /// <summary>按设施 id 取规格（找不到返回 null）</summary>
+    internal static BuildingSpec? ByStuffId(int stuffId)
+    {
+        foreach (var b in All)
+            if (b.StuffId == stuffId) return b;
+        return null;
+    }
+
+    /// <summary>
+    /// 按**窗口预制体名**取规格。
+    /// 用途：窗口事件里只知道 GameObject 名（`window_furnace`），据此找到归属建筑。
+    /// ⚠ 多座建筑**可以共用同一个窗口预制体**（例如将来两座都借 `window_blacksmith`）——
+    /// 那种情况返回第一个；调用方应再结合 `facility_guid` 精确判定。
+    /// </summary>
+    internal static BuildingSpec? ByWindowPrefab(string windowName)
+    {
+        if (string.IsNullOrEmpty(windowName)) return null;
+        foreach (var b in All)
+            if (b.WindowPrefab == windowName) return b;
+        return null;
+    }
+}

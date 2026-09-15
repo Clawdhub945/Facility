@@ -56,6 +56,13 @@ SUPER_IMG_ON_MAP = "super_factory_0"     # 场景贴图：我们自己新增的�
 SUPER_TECH_ID = 0
 SUPER_TXT_ID = 300                    # 建造菜单分类段号（与旧建筑同用「食品」段）
 
+# ⚠ 超级生产所的窗口预制体**必须写进生成器**：
+#   它决定用哪套原生 UI。手改 TerritoryModTest/Defs/build.json 是不行的 ——
+#   下次 make_defs.py --deploy 会把 window_prefab 重置回默认（踩过：
+#   结果超级生产所又变回「自绘选择条」，那条白底看不清的横条）。
+#   用 window_blacksmith 是为了拿到游戏**原生下拉** dp_blueprint。
+SUPER_WINDOW = "window_blacksmith"
+
 # ---------------------------------------------------------------------------
 # 实验建筑 105051：3×3 高炉兼容性实验
 #
@@ -210,6 +217,13 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         r.update({"facility_id": sid, "manpower_limit": 4, "is_main_facility": 0})
         return r
 
+    def super_row(guide):
+        """超级生产所：3×2 + 原生下拉窗口（window_blacksmith）。
+        ⚠ 窗口必须在生成器里指定，否则每次 --deploy 会被重置回 window_gatherers_hut。"""
+        r = build_row(SUPER_ID, SUPER_PREFAB, guide, 3, 2, door_way=1234)
+        r["window_prefab"] = SUPER_WINDOW
+        return r
+
     def furnace3_build_row(guide):
         """实验建筑：3×3 + 熔炉机制 + 熔炉窗口。
         必须显式覆盖 `class_name` / `window_prefab`，否则会继承采集营地那一套。"""
@@ -241,8 +255,8 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
-        # 超级生产所：3×2（用户要求），door_way=1234 与采集营地同款
-        build_row(SUPER_ID, SUPER_PREFAB, guide_common, 3, 2, door_way=1234),
+        # 超级生产所：3×2（用户要求），door_way=1234 与采集营地同款；窗口换成自带原生下拉的
+        super_row(guide_common),
         # 实验建筑：3×3；class/window 用熔炉那一套（要覆盖 build_row 的默认值）
         furnace3_build_row(guide_common),
     ]

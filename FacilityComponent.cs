@@ -180,61 +180,31 @@ public class FacilityComponent : MonoBehaviour
         catch (Exception ex) { Plugin.LogV($"[Facility] 换日诊断失败: {ex.Message}"); }
     }
 
+
     /// <summary>
-    /// 这座设施是不是「日常产出型」（本 mod 的 105040/105050 那种）。
+    /// 换日流程：诊断输出 + 交给 <see cref="FacilityProducer"/> 发产。
     ///
-    /// 判据顺序（**宁可放行也别误停产出**）：
-    ///   ① 反射读游戏自己的 `class_name` 字段 → 命中 `FacilityGatherersHut` 放行
-    ///   ② 读不到 → 用 stuff_id 白名单
-    ///
-    /// 为什么不用 C# 的 `is`：IL2CPP 里所有设施都是 interop 的 `Facility` 包装，
-    /// `f is FacilityGatherersHut` **永远为假** —— 踩过：害得综合生产所直接停产。
+    /// ## 重构说明
+    /// 早期产出逻辑（筛建筑、按工人数发产、入袋、记账）**全写在这个方法里**，
+    /// 用的是全局判据 —— 结果改一座建筑的行为会连带影响其他建筑
+    /// （用户实测：「你改高炉不再产木石，其他 2 种也跟着不生产了」）。
+    /// 现在产出逻辑搬到 `FacilityProducer`，**只认 `BuildingSpec.DailyProducer`**，
+    /// 与窗口/归属逻辑彻底解耦。本方法只剩：诊断 + 转调。
     /// </summary>
-    private static bool IsDailyProducer(Facility f)
-    {
-        // ① 反射读 class_name（避免编译期字段名猜错导致停摆）
-        try
-        {
-            var t = f.GetType();
-            object? v = null;
-            var pi = t.GetProperty("class_name");
-            if (pi != null) v = pi.GetValue(f);
-            if (v == null)
-            {
-                var fi = t.GetField("class_name");
-                if (fi != null) v = fi.GetValue(f);
-            }
-            if (v is string s && !string.IsNullOrEmpty(s))
-                return s == "FacilityGatherersHut";
-        }
-        catch { }
-
-        // ② 兜底：stuff_id 白名单（只认本 mod 的日常产出建筑，实验建筑不入列）
-        try
-        {
-            int sid = f.stuff_id;
-            return sid == Plugin.FacilityId || sid == Plugin.SuperFacilityId;
-        }
-        catch { }
-        return false;
-    }
-
     private void ProduceForNewDay(int dayKey)
     {
-        var products = Plugin.ParseProducts();
-        int extraId = Plugin.ExtraProduct;
-        if (extraId > 0)
-        {
-            bool exists = false;
-            foreach (var (sid, _) in products)
-                if (sid == extraId) { exists = true; break; }
-            if (!exists) products.Add((extraId, Plugin.ExtraPerDay));
-        }
-        if (products.Count == 0) return;
-
         LogClockDiagnostics(dayKey);
+        LogCareerRows();
 
-        // 深度诊断：career 行真实字段 + 工位状态（配合排查窗口 99/99 问题）
+        // 同日防重：万一日期判断退化（读档后时钟抖动），同一座建筑一天只发一次
+        _producedToday.Clear();
+
+        FacilityProducer.ProduceForAll(dayKey);
+    }
+
+    /// <summary>诊断：打印各建筑 career 行的真实字段（排查工位数/工人上限问题用）</summary>
+    private void LogCareerRows()
+    {
         try
         {
             var dic = D.Ins.career_dic_with_facility_id_as_key;
@@ -246,91 +216,9 @@ public class FacilityComponent : MonoBehaviour
                     Plugin.LogV($"[Facility] career行 {fid}: data_id={ci.data_id} limit={ci.manpower_limit} " +
                                 $"factor={ci.manpower_factor} npc_type={ci.npc_type} main={ci.is_main_facility}");
                 }
-                else
-                {
-                    Plugin.LogV($"[Facility] career行: 字典中无 {fid}！");
-                }
+                else Plugin.LogV($"[Facility] career行: 字典中无 {fid}！");
             }
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] career dump 失败: {ex.Message}"); }
-
-        var facilities = UnityEngine.Object.FindObjectsOfType<Facility>();
-        if (facilities == null) return;
-
-        int built = 0;
-        foreach (var f in facilities)
-        {
-            if (f == null || !Plugin.IsManaged(f.stuff_id)) continue;
-
-            // ⚠ 只给「日常产出型」建筑发产 —— 即 `FacilityGatherersHut` 那两座。
-            //   `Plugin.IsManaged` 是**归属判断**（窗口 UI / 工位数补丁也用它），
-            //   而实验建筑 105051 用的是 `FacilityFurnace` 机制（燃料 + 生产计划），
-            //   它也在 ManagedFacilityIds 里 —— 早先只按 IsManaged 筛，
-            //   结果**实验高炉也在每天产原木石料**（用户实测反馈）。
-            //   归属判断 ≠ 产出对象，必须再按设施类型过滤。
-            //
-            // ⚠⚠ 类型判断**不能用 C# 的 `is`**：IL2CPP interop 里所有设施都表现为基类
-            //   `Facility`，`f is FacilityGatherersHut` **永远为假** ——
-            //   早期这么写过，结果把自己两座建筑也全拦住了（综合生产所直接停产）。
-            //
-            // 判据顺序（宁可放行也别误停）：
-            //   ① 读游戏自己的 `class_name` 字段，等于 FacilityGatherersHut → 放行
-            //   ② 读不到 → 用 stuff_id 白名单（本 mod 的日常产出建筑）
-            if (!IsDailyProducer(f))
-            {
-                Plugin.LogV($"[Facility] guid={f.guid} 不是日常产出型设施，跳过发产");
-                continue;
-            }
-            bool finished;
-            try { finished = f.is_build_finished; }
-            catch { finished = true; }
-
-            int workers = 0;
-            try { workers = f.npc_list?.Count ?? 0; } catch { }
-            int workPos = -1, origPos = -1, customLimit = -1;
-            bool isCustom = false;
-            try { workPos = f.GetWorkPositionCount(); } catch { }
-            try { origPos = f.GetOriginalWorkPosCount(); } catch { }
-            try { isCustom = f.is_custom_worker_count_limit; customLimit = f.worker_count_limit; } catch { }
-            Plugin.LogV($"[Facility] 生产所 guid={f.guid} 完工={finished} 工位数={workPos} 原始工位={origPos} " +
-                        $"自定义上限={isCustom}({customLimit}) 工人={workers}");
-            if (!finished) continue;
-            if (workers <= 0)
-            {
-                Plugin.LogV($"[Facility] 生产所 guid={f.guid} 无工人，今日跳过");
-                continue;
-            }
-            // 同日防重：万一日期判断再次退化（例如读档后时钟抖动），同一座建筑一天只发一次
-            if (!_producedToday.Add(f.guid))
-            {
-                Plugin.LogV($"[Facility] 生产所 guid={f.guid} 今日已发过产，跳过");
-                continue;
-            }
-
-            built++;
-            foreach (var (sid, per) in products)
-            {
-                int count = workers * per;
-                try
-                {
-                    // ① 入袋：真实物品（搬运工会把它搬进仓库）
-                    f.AddStuff(sid, count);
-                    // ② 记账：进本建筑的「今年产量」记录袋，年底滚进「去年产量」
-                    //    （官方 Facility.RecordProduct 是唯一写入入口，见 Facility.cs:71；
-                    //     窗口记录区读的就是 ProductRecordBagThisYear/LastYear）
-                    try { f.RecordProduct(sid, count); }
-                    catch (Exception rex) { Plugin.LogV($"[Facility] 产量记账失败 guid={f.guid} 物品{sid}: {rex.Message}"); }
-                    Plugin.LogV($"[Facility] 生产所 guid={f.guid} 工人×{workers} → 物品{sid} +{count}");
-                }
-                catch (Exception ex)
-                {
-                    Plugin.LogError($"[Facility] 入袋失败 guid={f.guid} 物品{sid}: {ex.Message}");
-                }
-            }
-        }
-        // 每天一条汇总日志默认**不输出**（用户要求安静）：
-        // 想看就打开 cfg「调试.日志详细模式」，那时才会连带输出每座建筑的明细。
-        if (built > 0)
-            Plugin.LogV($"[Facility] 第 {dayKey} 日：{built} 座生产所完成产出（{products.Count} 种产品）");
     }
 }

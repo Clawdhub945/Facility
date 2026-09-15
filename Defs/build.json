@@ -148,7 +148,7 @@
     "transport_by_wagon_in_of_fix_route": 0,
     "transport_by_wagon_out_of_fix_route": 1,
     "transport_by_wagon_only_in_or_out_of_fix_route": 0,
-    "window_prefab": "window_gatherers_hut",
+    "window_prefab": "window_blacksmith",
     "order_in_facility_list": 1,
     "can_dismantle": "1",
     "disable_dismantle_op": "0",

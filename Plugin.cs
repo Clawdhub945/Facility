@@ -42,7 +42,12 @@ public class Plugin : BasePlugin
     public const int Furnace3TestId = 105051;
 
     /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
-    public static readonly int[] ManagedFacilityIds = { FacilityId, SuperFacilityId, Furnace3TestId };
+    /// <summary>
+    /// 本 mod 管辖的全部设施 id。
+    /// ⚠ 现在**从 Buildings 规格表派生**（唯一事实来源）——
+    /// 加新建筑只需在 BuildingSpec.cs 里加一条规格，不必再改这里。
+    /// </summary>
+    public static int[] ManagedFacilityIds => Buildings.AllIds();
 
     /// <summary>该设施是否由本 mod 添加</summary>
     public static bool IsManaged(int stuffId)

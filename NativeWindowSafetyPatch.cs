@@ -46,6 +46,13 @@ internal static class NativeWindowSafetyPatch
         ("WindowWorkshop", "InitDpBlueprint"),
         ("WindowWorkshop", "UpdateAlternativeFormula"),
         ("WindowWorkshop", "Refresh"),
+
+        // ⚠ 实测报错：`WindowWorkshop.SetInfo` 中途抛
+        //   `System.NullReferenceException at WindowWorkshop.UpdateAutoMakeProductOfMaterials()`
+        //   → **SetInfo 中断** → 窗口控件停在默认值、回调没接上
+        //   → 表现就是用户说的「全是默认值且无法交互」。
+        ("WindowWorkshop", "UpdateAutoMakeProductOfMaterials"),
+        ("WindowWorkshop", "SetInfo"),   // 兜底：整段 SetInfo 跳过（下拉我们自己填，不依赖它）
     };
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
@@ -59,7 +66,8 @@ internal static class NativeWindowSafetyPatch
             if (t == null) continue;
             var m = AccessTools.Method(t, methodName);
             if (m == null) continue;
-            if (m.GetParameters().Length != 0) continue;   // 只护栏无参方法
+            // SetInfo(Facility) 是带参方法，也要能护栏
+            if (m.GetParameters().Length > 1) continue;
             list.Add(m);
         }
 
