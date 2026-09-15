@@ -110,6 +110,61 @@ FURNACE_NATIVE_IMG = "ui_105028"        # 直接用原生熔炉图标
 FURNACE_NATIVE_IMG_ON_MAP = "furnace_0"
 FURNACE_NATIVE_CELL = 2
 
+# ---------------------------------------------------------------------------
+# 工业 mod 内容
+# ---------------------------------------------------------------------------
+
+# 新物品「钢」：type 6（资源）/ sub 603（金属），与铁锭 603001 同段
+#   prefab 用通用的 stuff_on_map（**不需要自己做世界模型**，实测铁锭等也是这样）
+#   stuff_img / stuff_img_on_map 指向我们自己画的图标（由 make_industry_icons.py 生成）
+STEEL_ID = 603010
+STEEL_NAME = "钢"
+STEEL_DESC = "高炉冶炼出的钢材。比铁更坚硬，可制作钢制工具。"
+STEEL_IMG = "ui_603010"
+STEEL_IMG_ON_MAP = "603010"
+
+# 新物品「钢制工具」：type 4（物品）/ sub 403（工具），效率加成高于优质工具(3.0)
+STEEL_TOOL_ID = 403010
+STEEL_TOOL_NAME = "钢制工具"
+STEEL_TOOL_DESC = "钢制工具，比优质工具更耐用高效。"
+STEEL_TOOL_IMG = "ui_403010"
+STEEL_TOOL_IMG_ON_MAP = "403010"
+STEEL_TOOL_EFFECT = 4.0            # 效率加成（普通2.0 / 优质3.0）
+STEEL_TOOL_PRICE = 40
+
+# 新建筑「高炉」：**必须用原生熔炉骨架**（urnace，2×2）——
+# 实测：window_furnace 的控件（配方下拉、燃料设置）依赖 prefab 上的 FacilityFurnace 组件，
+# 借别尺寸/别类型的骨架会导致「能显示但不能交互」。
+# 煤作为**燃料**（煤的 remark=「燃料系数」、effect_value=5.0）。
+BLAST_ID = 105053
+BLAST_NAME = "高炉"
+BLAST_DESC = ("冶炼钢材的工业设施。以煤为燃料，把铁锭炼成钢。"
+              "\n# 配方：铁锭 → 钢；燃料：煤（在窗口里设置燃料类型）")
+BLAST_PREFAB = "furnace"
+BLAST_CLASS = "FacilityFurnace"
+BLAST_WINDOW = "window_furnace"
+BLAST_IMG = "ui_105053"           # 自己画的高炉图标
+BLAST_IMG_ON_MAP = "furnace_0"     # 世界外观沿用熔炉（骨架决定）
+BLAST_CELL = 2
+
+# 高炉配方：铁锭×2 → 钢×1（days=2 表示更快）
+BLAST_RECIPE = {
+    "product_id": STEEL_ID,
+    "output_count": 1,
+    "days": 2.0,
+    "materials": [(603001, 2)],       # 铁锭 ×2
+}
+
+# 制造台配方：原木×10 + 钢×3 → 钢制工具×1（用户指定）
+#   ⚠ 这条写的是**原版制造台**(105010) 的表 → 跨 mod 写同一张表，有冲突风险（用户已确认接受）。
+WORKBENCH_ID = 105010
+STEEL_TOOL_RECIPE = {
+    "product_id": STEEL_TOOL_ID,
+    "output_count": 1,
+    "days": 10.0,
+    "materials": [(604001, 10), (STEEL_ID, 3)],   # 原木×10 + 钢×3
+}
+
 TEST_DIR = Path(r"C:\TerritoryModTest")
 DEF_DEPLOY_DIR = TEST_DIR / "Defs"
 TEX_DEPLOY_DIR = TEST_DIR / "Textures"
@@ -120,7 +175,7 @@ DEFAULT_PRODUCTS = [(604001, 10, "原木"), (605001, 10, "石料")]
 DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, "红宝石")]
 # formula_id 槽位基数：官方惯例 formula_id = product_id*100 + 序号；
 # 105040 用 40 起、105050 用 50 起，跟官方 206 行都不冲突，也便于一眼认出是本 mod 的行。
-FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51, FURNACE_NATIVE_ID: 52}
+FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51, FURNACE_NATIVE_ID: 52, BLAST_ID: 53}
 
 # 建筑外观预设（只对旧建筑 105040 生效；新建筑用 mod 自带贴图）：
 # stuff.json 的 prefab / stuff_img / stuff_img_on_map 都换成目标建筑的资源名。
@@ -276,6 +331,30 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         })
         return r
 
+    def item_row(src_id, sid, name, desc, icon, icon_map, **overrides):
+        """造一条**物品**行（steel/工具这类非建筑物品）。
+
+        ⚠ 必须照抄**同类型原生物品**当模板：物品行的字段很多
+        （price/weight/effect_value/remark/stuff_type/stuff_sub_type/
+        can_carry_one_by_one_anytime/incineration_result/…），
+        少一个都可能在 UI 或搬运逻辑里出问题。
+        所以调用方传入 src_id（如铁锭 603001 / 普通工具 403001）作模板。
+        """
+        tpl = next((r for r in stuff if r.get("stuff_id") == src_id), None)
+        if tpl is None:
+            raise RuntimeError(f"物品模板 {src_id} 不在官方 stuff 表里")
+        r = dict(tpl)
+        r.update({
+            "stuff_id": sid,
+            "stuff_namezh-CN": name,
+            "desczh-CN": desc,
+            "stuff_img": icon,
+            "stuff_img_on_map": icon_map,
+            "prefab": "stuff_on_map",     # 通用世界模型（原生物品也这样）
+        })
+        r.update(overrides)
+        return r
+
     def build_row(sid, model, guide, cellw=3, cellh=3, door_way=1):
         """⚠ `cellw/cellh` 必须与所用 prefab 匹配（用户要求超级生产所改成 2×2）。
         `door_way` 是门位掩码：1 = 只正面开门（官方 2×2 建筑熔炉/酒桶用的就是 1）。"""
@@ -335,6 +414,25 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         })
         return r
 
+    def blast_furnace_build_row(guide):
+        """高炉：**原生熔炉骨架**（2×2）+ FacilityFurnace + window_furnace。
+
+        实测结论：熔炉窗口的配方下拉 / 燃料设置依赖 prefab 上的 `FacilityFurnace` 组件，
+        借别尺寸或别类型的骨架会导致「能显示但不能交互」（对照实验 105051 vs 105052）。
+        """
+        r = build_row(BLAST_ID, BLAST_PREFAB, guide, BLAST_CELL, BLAST_CELL)
+        r.update({
+            "class_name": BLAST_CLASS,
+            "window_prefab": BLAST_WINDOW,
+            "have_worker": 1,
+            "must_have_worker": 1,
+            "has_bag": "1",
+            "res_range": 0,
+            "res_range_anchor": 0,
+            "menu_group": 3,          # 制造段（与 tech.txt_id=3700 配对）
+        })
+        return r
+
     guide_common = ("安排工人后，每个工人每天稳定产出资源\n"
                     "# 产出内容与数量在 BepInEx/config/claude.facility.cfg 配置\n"
                     "# 工人越多，每日产出越多；产出会自动入库")
@@ -350,6 +448,19 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         # 对照：原生配置熔炉（骨架 furnace、机制 FacilityFurnace、窗口 window_furnace，2×2）
         stuff_row(FURNACE_NATIVE_ID, FURNACE_NATIVE_NAME, FURNACE_NATIVE_DESC,
                   FURNACE_NATIVE_IMG, FURNACE_NATIVE_IMG_ON_MAP, FURNACE_NATIVE_PREFAB),
+        # ---- 工业 mod 内容 ----
+        # 新物品：钢（type6/sub603 金属）、钢制工具（type4/sub403 工具）
+        # ⚠ 物品的世界模型统一用通用 stuff_on_map（铁锭等原生物品也这样），
+        #   所以只需提供图标 sprite（make_industry_icons.py 生成）
+        item_row(603001, STEEL_ID, STEEL_NAME, STEEL_DESC,
+                 STEEL_IMG, STEEL_IMG_ON_MAP),                     # 模板=铁锭（金属类）
+        item_row(403001, STEEL_TOOL_ID, STEEL_TOOL_NAME, STEEL_TOOL_DESC,
+                 STEEL_TOOL_IMG, STEEL_TOOL_IMG_ON_MAP,            # 模板=普通工具（工具类）
+                 effect_value=STEEL_TOOL_EFFECT, price=STEEL_TOOL_PRICE,
+                 remark="效率加成"),
+        # 新建筑：高炉（原生熔炉骨架，2×2）
+        stuff_row(BLAST_ID, BLAST_NAME, BLAST_DESC,
+                  BLAST_IMG, BLAST_IMG_ON_MAP, BLAST_PREFAB),
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
@@ -358,6 +469,7 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         # 实验建筑：3×3；class/window 用熔炉那一套（要覆盖 build_row 的默认值）
         furnace3_build_row(guide_common),
         furnace_native_build_row(guide_common),
+        blast_furnace_build_row(guide_common),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——
     # 100=初始(0) 200=住所(1) 300=食品(2) 3700=制造(3) 1500=物流(4) 600=路桥(7)。
@@ -375,12 +487,63 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         {"txt_id": 3700, "tech_id": 0, "facility_id": FURNACE_NATIVE_ID,
          "seed_id": "", "event_id": "",
          "tech_desc_zh-CN": "建造熔炉对照实验"},
+        {"txt_id": 3700, "tech_id": 0, "facility_id": BLAST_ID,
+         "seed_id": "", "event_id": "",
+         "tech_desc_zh-CN": "建造高炉：以煤为燃料把铁锭炼成钢"},
     ]
     career_rows = [career_row(MOD_ID), career_row(SUPER_ID),
-                   career_row(FURNACE3_ID), career_row(FURNACE_NATIVE_ID)]
+                   career_row(FURNACE3_ID), career_row(FURNACE_NATIVE_ID),
+                   career_row(BLAST_ID)]
 
     blueprint_rows = (make_blueprints(bp_table, stuff_type_by_id, MOD_ID, products_for(MOD_ID)) +
                       make_blueprints(bp_table, stuff_type_by_id, SUPER_ID, products_for(SUPER_ID)))
+
+    # ---- 工业 mod 配方 ----
+    def recipe_row(facility_id, spec, slot):
+        """按配方规格造一行 blueprint。
+
+        ⚠ blueprint 行同时承担两个职责：
+          1. **产品数据键**（GetProductDataKeyList 查它，缺行会让窗口 SetInfo 炸断）
+          2. **配方定义**（_material_N/_nN 是消耗材料、product_id/output_count 是产出）
+        所以新物品（钢/钢制工具）**必须有**至少一行 blueprint，否则它做出来也没处记账。
+        """
+        pid = spec["product_id"]
+        # 模板优先用**同产品**的官方行；没有就用该设施已有的行；再退回石料行
+        tpl = None
+        for r in bp_table:
+            if r.get("product_id") == pid:
+                tpl = r
+                break
+        if tpl is None:
+            tpl = next((r for r in bp_table if r.get("facility_id") == facility_id), None)
+        if tpl is None:
+            tpl = next(r for r in bp_table if r.get("product_id") == 605001)
+
+        row = dict(tpl)
+        row["formula_id"] = pid * 100 + slot
+        row["facility_id"] = facility_id
+        row["product_id"] = pid
+        row["output_count"] = spec["output_count"]
+        row["days"] = spec["days"]
+        row["disable"] = 0
+        row["need_research"] = 0
+        # 材料（最多 3 组，游戏表结构如此）
+        mats = list(spec["materials"])[:3]
+        for i in (1, 2, 3):
+            if i <= len(mats):
+                row[f"_material_{i}"] = mats[i - 1][0]
+                row[f"_n{i}"] = mats[i - 1][1]
+            else:
+                row[f"_material_{i}"] = ""
+                row[f"_n{i}"] = ""
+        return row
+
+    # 高炉：铁锭 → 钢
+    blueprint_rows.append(recipe_row(BLAST_ID, BLAST_RECIPE, 1))
+    # 制造台：原木 + 钢 → 钢制工具
+    #   ⚠ 写的是**原版制造台**(105010) 的表 —— 跨 mod 写同一张表，有冲突风险（用户已确认接受）
+    blueprint_rows.append(recipe_row(WORKBENCH_ID, STEEL_TOOL_RECIPE, 1))
+    print(f"  工业配方: 高炉炼钢 + 制造台造钢制工具")
 
     # 熔炉系建筑：克隆**原生熔炉(105028) 的全部配方**给它自己。
     # 原因：配方 UI 按 facility_id 取行，新建筑不会自动继承 → 实测窗口里配方下拉是空的。

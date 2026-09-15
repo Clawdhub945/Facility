@@ -128,7 +128,31 @@ internal static class Buildings
         CustomSpritePrefix = null,
     };
 
-    internal static readonly BuildingSpec[] All = { Producer, SuperProducer, Furnace3Test, FurnaceNativeTest };
+    /// <summary>
+    /// 高炉 105053（工业 mod 第一座建筑）：**原生熔炉骨架**（`furnace`，2×2）
+    /// + `FacilityFurnace` + `window_furnace`。
+    ///
+    /// 与熔炉同理：走游戏自己的**燃料 + 生产计划**机制，
+    /// **不参与**本 mod 的每日产出、**不碰**窗口
+    /// （配方下拉与「设置燃料类型」都是原生的 —— 实测只要骨架正确它们就能用）。
+    ///
+    /// 配方（铁锭×2 → 钢×1）写在 `blueprint.json` 的 `facility_id=105053`；
+    /// 燃料用煤（煤的 remark=「燃料系数」、effect_value=5.0）。
+    /// </summary>
+    internal static readonly BuildingSpec BlastFurnace = new()
+    {
+        StuffId = Plugin.BlastFurnaceId,             // 105053
+        Name = "高炉",
+        WindowPrefab = "window_furnace",
+        DailyProducer = false,
+        FillExtraProductDropdown = false,
+        HideControls = Array.Empty<string>(),
+        RewriteWindowTexts = false,
+        CustomSpritePrefix = null,
+    };
+
+    internal static readonly BuildingSpec[] All =
+        { Producer, SuperProducer, Furnace3Test, FurnaceNativeTest, BlastFurnace };
 
     /// <summary>本 mod 全部设施 id</summary>
     internal static int[] AllIds()

@@ -47,6 +47,15 @@ public class Plugin : BasePlugin
     /// </summary>
     public const int FurnaceNativeTestId = 105052;
 
+    /// <summary>
+    /// 工业 mod 第一座建筑 105053「高炉」：原生熔炉骨架（`furnace`，2×2）
+    /// + `FacilityFurnace` + `window_furnace`，以**煤为燃料**把铁锭炼成钢。
+    ///
+    /// ⚠ 它走游戏自己的燃料/生产计划机制，**不参与**本 mod 的每日产出
+    /// （`BuildingSpec.DailyProducer = false`）。
+    /// </summary>
+    public const int BlastFurnaceId = 105053;
+
     /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
     /// <summary>
     /// 本 mod 管辖的全部设施 id。
