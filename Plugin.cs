@@ -41,6 +41,12 @@ public class Plugin : BasePlugin
     /// </summary>
     public const int Furnace3TestId = 105051;
 
+    /// <summary>
+    /// 对照实验 105052「熔炉对照实验」：完全照抄原生熔炉的骨架/类/窗口（2×2）。
+    /// 与 105051 只有骨架 prefab 不同，用来定位「窗口能显示但控件不能交互」的原因。
+    /// </summary>
+    public const int FurnaceNativeTestId = 105052;
+
     /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
     /// <summary>
     /// 本 mod 管辖的全部设施 id。

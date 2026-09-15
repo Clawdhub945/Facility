@@ -21,5 +21,13 @@
     "seed_id": "",
     "event_id": "",
     "tech_desc_zh-CN": "建造三乘三高炉实验"
+  },
+  {
+    "txt_id": 3700,
+    "tech_id": 0,
+    "facility_id": 105052,
+    "seed_id": "",
+    "event_id": "",
+    "tech_desc_zh-CN": "建造熔炉对照实验"
   }
 ]

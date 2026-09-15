@@ -78,13 +78,37 @@ FURNACE3_NAME = "三乘三高炉实验"
 FURNACE3_DESC = "兼容性实验建筑：3×3 占地 + 熔炉机制。用于验证尺寸是否兼容。"
 # ⚠ 骨架 prefab **自带建造地形限制**：mine（矿井）只能建在山体上（用户实测）。
 #   限制来自预制体本身（build.json 里没有地形字段），不是数据能改的。
-#   换成 	rading_desk（交易台）—— 原生 3×3、平地上可建、无限制字段。
+#   换成 trading_desk（交易台）—— 原生 3×3、平地上可建、无限制字段。
 FURNACE3_PREFAB = "trading_desk"     # 3×3 骨架（交易台）
 FURNACE3_CLASS = "FacilityFurnace"    # 熔炉机制（燃料 + 生产计划）
 FURNACE3_WINDOW = "window_furnace"
 FURNACE3_IMG = "ui_103004"   # 暂借交易台图标（保证菜单里不是白块）
 FURNACE3_IMG_ON_MAP = "trading_desk_0"
 FURNACE3_CELL = 3
+
+# ---------------------------------------------------------------------------
+# 对照实验 105052：**原生配置的熔炉**（骨架/类/窗口三者一致）
+#
+# 目的：定位「高炉窗口能显示但控件不能交互」到底是哪一层的问题。
+# 做法：完全照抄原生熔炉(105028) 的三要素：prefab=`furnace`、
+#       class=`FacilityFurnace`、window=`window_furnace`、2×2。
+#
+# 与 105051 的**唯一差别**就是骨架 prefab（`furnace` vs `trading_desk`）：
+#   * 若 105052 交互正常、105051 不正常 → 证实「prefab 上的组件必须与 class_name 一致」
+#     （`furnace` 预制体自带 FacilityFurnace，而 `trading_desk` 自带 FacilityTradingDesk）
+#   * 若两者都不正常 → 问题在别处（例如窗口依赖 2×2 的其他假设）
+#
+# 结论会决定工业 mod 的高炉走哪条路：3×3 借骨架，还是就用 2×2 原生熔炉。
+# ---------------------------------------------------------------------------
+FURNACE_NATIVE_ID = 105052
+FURNACE_NATIVE_NAME = "熔炉对照实验"
+FURNACE_NATIVE_DESC = "对照实验：完全照抄原生熔炉的骨架/类/窗口，用于定位交互问题。"
+FURNACE_NATIVE_PREFAB = "furnace"
+FURNACE_NATIVE_CLASS = "FacilityFurnace"
+FURNACE_NATIVE_WINDOW = "window_furnace"
+FURNACE_NATIVE_IMG = "ui_105028"        # 直接用原生熔炉图标
+FURNACE_NATIVE_IMG_ON_MAP = "furnace_0"
+FURNACE_NATIVE_CELL = 2
 
 TEST_DIR = Path(r"C:\TerritoryModTest")
 DEF_DEPLOY_DIR = TEST_DIR / "Defs"
@@ -96,7 +120,7 @@ DEFAULT_PRODUCTS = [(604001, 10, "原木"), (605001, 10, "石料")]
 DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, "红宝石")]
 # formula_id 槽位基数：官方惯例 formula_id = product_id*100 + 序号；
 # 105040 用 40 起、105050 用 50 起，跟官方 206 行都不冲突，也便于一眼认出是本 mod 的行。
-FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51}
+FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51, FURNACE_NATIVE_ID: 52}
 
 # 建筑外观预设（只对旧建筑 105040 生效；新建筑用 mod 自带贴图）：
 # stuff.json 的 prefab / stuff_img / stuff_img_on_map 都换成目标建筑的资源名。
@@ -240,6 +264,22 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         })
         return r
 
+    def furnace_native_build_row(guide):
+        """对照实验：完全照抄原生熔炉的三要素（prefab/class/window 一致），2×2。"""
+        r = build_row(FURNACE_NATIVE_ID, FURNACE_NATIVE_PREFAB, guide,
+                      FURNACE_NATIVE_CELL, FURNACE_NATIVE_CELL)
+        r.update({
+            "class_name": FURNACE_NATIVE_CLASS,
+            "window_prefab": FURNACE_NATIVE_WINDOW,
+            "have_worker": 1,
+            "must_have_worker": 1,
+            "has_bag": "1",
+            "res_range": 0,
+            "res_range_anchor": 0,
+            "menu_group": 3,
+        })
+        return r
+
     guide_common = ("安排工人后，每个工人每天稳定产出资源\n"
                     "# 产出内容与数量在 BepInEx/config/claude.facility.cfg 配置\n"
                     "# 工人越多，每日产出越多；产出会自动入库")
@@ -249,9 +289,12 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         stuff_row(MOD_ID, NAME, DESC, img, img_on_map, prefab),
         # 超级生产所：自定义外观（prefab 借用 workbench，贴图由 DLL 运行时换成我们自己的）
         stuff_row(SUPER_ID, SUPER_NAME, SUPER_DESC, SUPER_IMG, SUPER_IMG_ON_MAP, SUPER_PREFAB),
-        # 实验：3×3 高炉（骨架 mine、机制 FacilityFurnace、窗口 window_furnace）
+        # 实验：3×3 高炉（骨架 trading_desk、机制 FacilityFurnace、窗口 window_furnace）
         stuff_row(FURNACE3_ID, FURNACE3_NAME, FURNACE3_DESC,
                   FURNACE3_IMG, FURNACE3_IMG_ON_MAP, FURNACE3_PREFAB),
+        # 对照：原生配置熔炉（骨架 furnace、机制 FacilityFurnace、窗口 window_furnace，2×2）
+        stuff_row(FURNACE_NATIVE_ID, FURNACE_NATIVE_NAME, FURNACE_NATIVE_DESC,
+                  FURNACE_NATIVE_IMG, FURNACE_NATIVE_IMG_ON_MAP, FURNACE_NATIVE_PREFAB),
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
@@ -259,6 +302,7 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         super_row(guide_common),
         # 实验建筑：3×3；class/window 用熔炉那一套（要覆盖 build_row 的默认值）
         furnace3_build_row(guide_common),
+        furnace_native_build_row(guide_common),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——
     # 100=初始(0) 200=住所(1) 300=食品(2) 3700=制造(3) 1500=物流(4) 600=路桥(7)。
@@ -273,8 +317,12 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         {"txt_id": 3700, "tech_id": 0, "facility_id": FURNACE3_ID,
          "seed_id": "", "event_id": "",
          "tech_desc_zh-CN": "建造三乘三高炉实验"},
+        {"txt_id": 3700, "tech_id": 0, "facility_id": FURNACE_NATIVE_ID,
+         "seed_id": "", "event_id": "",
+         "tech_desc_zh-CN": "建造熔炉对照实验"},
     ]
-    career_rows = [career_row(MOD_ID), career_row(SUPER_ID), career_row(FURNACE3_ID)]
+    career_rows = [career_row(MOD_ID), career_row(SUPER_ID),
+                   career_row(FURNACE3_ID), career_row(FURNACE_NATIVE_ID)]
 
     blueprint_rows = (make_blueprints(bp_table, stuff_type_by_id, MOD_ID, products_for(MOD_ID)) +
                       make_blueprints(bp_table, stuff_type_by_id, SUPER_ID, products_for(SUPER_ID)))

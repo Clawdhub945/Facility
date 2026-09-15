@@ -106,7 +106,29 @@ internal static class Buildings
         CustomSpritePrefix = null,
     };
 
-    internal static readonly BuildingSpec[] All = { Producer, SuperProducer, Furnace3Test };
+    /// <summary>
+    /// 熔炉对照实验 105052：**完全照抄原生熔炉的三要素**
+    /// （prefab=urnace、class=FacilityFurnace、window=window_furnace、2×2）。
+    ///
+    /// 用途：与 105051（3×3 借 	rading_desk 骨架）做**严格对照** ——
+    /// 两者类与窗口相同、只有骨架 prefab 不同，用来定位
+    /// 「窗口能显示但控件不能交互」是不是「prefab 组件与 class_name 不一致」造成的。
+    ///
+    /// 与熔炉同理：走游戏自己的机制，**不参与**本 mod 产出、**不碰**窗口。
+    /// </summary>
+    internal static readonly BuildingSpec FurnaceNativeTest = new()
+    {
+        StuffId = Plugin.FurnaceNativeTestId,        // 105052
+        Name = "熔炉对照实验",
+        WindowPrefab = "window_furnace",
+        DailyProducer = false,
+        FillExtraProductDropdown = false,
+        HideControls = Array.Empty<string>(),
+        RewriteWindowTexts = false,
+        CustomSpritePrefix = null,
+    };
+
+    internal static readonly BuildingSpec[] All = { Producer, SuperProducer, Furnace3Test, FurnaceNativeTest };
 
     /// <summary>本 mod 全部设施 id</summary>
     internal static int[] AllIds()

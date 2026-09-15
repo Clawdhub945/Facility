@@ -1,0 +1,35 @@
+重构收尾 + 新增对照实验 105052「熔炉对照实验」（定位高炉交互问题）
+
+## 已完成：每座建筑独立（用户确认「三座建筑基本功能正常」）
+`BuildingSpec` 规格表生效，三座建筑各自独立：
+  105040 综合生产所 / 105050 超级生产所 / 105051 三乘三高炉实验
+顺带修掉 `Apply` 每帧跑导致的日志刷屏与 HideAll 每帧反射扫描的性能浪费
+（改成每个窗口只处理一次，用实例 ID 标记）。
+
+## 本轮新增：严格对照实验
+用户要求按「prefab 组件与 class_name 不一致」的思路验证。做法是加一座**完全照抄原生熔炉**的建筑：
+
+| id | 名称 | 骨架 prefab | class_name | window | 占地 |
+|---|---|---|---|---|---|
+| 105051 | 三乘三高炉实验 | `trading_desk` | `FacilityFurnace` | `window_furnace` | 3×3 |
+| **105052** | **熔炉对照实验** | **`furnace`** | `FacilityFurnace` | `window_furnace` | **2×2** |
+
+**两者类与窗口完全相同，唯一差别是骨架 prefab** ——
+这是最干净的对照：若 105052 交互正常而 105051 不正常，
+就证实「窗口依赖 prefab 上的组件（`furnace` 自带 `FacilityFurnace`，
+而 `trading_desk` 自带 `FacilityTradingDesk`），`class_name` 改不了它」。
+
+## 生成器参数化
+`make_defs.py` 里两个实验建筑都做成了独立常量 + 独立 build 行函数
+（`furnace3_build_row` / `furnace_native_build_row`），
+以后换骨架/占地/窗口只改常量，不必动逻辑。
+
+## 规格表
+`BuildingSpec` 新增 `FurnaceNativeTest`（`DailyProducer=false`、
+`HideControls` 空、`RewriteWindowTexts=false`）——
+即**不产木石、不碰窗口**，与熔炉同理。这就是独立化的价值：
+加一座建筑不用改任何逻辑代码。
+
+## 存档选择
+改为按**目录内文件 mtime** 取最新（用户指定规则）。
+实测最新档 = `2026-09-15_16_17762512122c480da5a72cc42419900c`。

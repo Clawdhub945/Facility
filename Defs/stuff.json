@@ -64,5 +64,27 @@
     "op_increase_step": 1,
     "stuff_namezh-CN": "三乘三高炉实验",
     "desczh-CN": "兼容性实验建筑：3×3 占地 + 熔炉机制。用于验证尺寸是否兼容。"
+  },
+  {
+    "stuff_id": 105052,
+    "price": 0,
+    "can_carry_one_by_one_anytime": 0,
+    "incineration_result": 0,
+    "spoilage_year_limit": 0,
+    "disable": 0,
+    "can_pick_up_by_ant": 0,
+    "ignore_in_summary": 0,
+    "sort_index": 0,
+    "stuff_type": 1,
+    "stuff_sub_type": 105,
+    "effect_value": 0.0,
+    "prefab": "furnace",
+    "stuff_img": "ui_105028",
+    "stuff_img_on_map": "furnace_0",
+    "weight": 1.0,
+    "reward_count_once": 0,
+    "op_increase_step": 1,
+    "stuff_namezh-CN": "熔炉对照实验",
+    "desczh-CN": "对照实验：完全照抄原生熔炉的骨架/类/窗口，用于定位交互问题。"
   }
 ]
