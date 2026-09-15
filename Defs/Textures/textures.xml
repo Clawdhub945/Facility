@@ -30,4 +30,34 @@
       anchor="0.5,0.5"
       />
 
+
+  <Image
+      file="ui_603010.png"
+      action="add"
+      anchor="0.5,0.5"
+      />
+
+  <Image
+      file="603010.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="ui_403010.png"
+      action="add"
+      anchor="0.5,0.5"
+      />
+
+  <Image
+      file="403010.png"
+      action="add"
+      anchor="0,0"
+      />
+
+  <Image
+      file="ui_105053.png"
+      action="add"
+      anchor="0.5,0.5"
+      />
 </ModImages>

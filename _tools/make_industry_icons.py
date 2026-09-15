@@ -93,12 +93,51 @@ def main():
         p = OUT / m
         print(f"  生成 {m}  {p.stat().st_size} 字节  {Image.open(p).size}")
 
+    # ⚠⚠ **必须把新图写进 textures.xml**，否则游戏不认这些 sprite：
+    #   症状一：建造菜单里图标是**白块**
+    #   症状二：物品格（制造台配方产物）里图标**透明**
+    #   原因：`stuff_img` / `stuff_img_on_map` 只是 sprite **名字**，
+    #         真正的贴图要由 `Textures/textures.xml` 的 `<Image action="add">` 注册进游戏贴图表。
+    #   这个坑踩过：只把 png 拷进 Textures 目录、忘了更新清单 → 图标不显示。
+    update_textures_xml(made)
+
     argv = sys.argv[1:]
     if "--deploy" in argv:
         DEPLOY.mkdir(parents=True, exist_ok=True)
         for m in made:
             (DEPLOY / m).write_bytes((OUT / m).read_bytes())
-        print(f"已部署到 {DEPLOY}")
+        # 清单也要一起部署
+        (DEPLOY / "textures.xml").write_bytes((OUT / "textures.xml").read_bytes())
+        print(f"已部署到 {DEPLOY}（含 textures.xml）")
+
+
+def update_textures_xml(new_files):
+    """把新图**合并**进 Defs/Textures/textures.xml（保持已有条目，不覆盖别的脚本的产出）。
+
+    条目约定：
+      * 建筑/世界图（铺在地上的）→ `anchor="0,0"`（左下角对齐，官方教程对建筑图的写法）
+      * UI 图标（居中显示）      → `anchor="0.5,0.5"`
+    这里按文件名判断：`ui_*` 走居中，其余走左下角。
+    """
+    import re
+    xml_path = OUT / "textures.xml"
+    text = xml_path.read_text(encoding="utf-8") if xml_path.exists() else '<ModImages version="1">\n</ModImages>\n'
+
+    added = []
+    for f in new_files:
+        if re.search(rf'file="{re.escape(f)}"', text):
+            continue
+        anchor = "0.5,0.5" if f.startswith("ui_") else "0,0"
+        entry = (f'\n  <Image\n      file="{f}"\n'
+                 f'      action="add"\n      anchor="{anchor}"\n      />\n')
+        text = text.replace("</ModImages>", entry + "</ModImages>")
+        added.append(f)
+
+    xml_path.write_text(text, encoding="utf-8", newline="\n")
+    if added:
+        print(f"  textures.xml 新增 {len(added)} 条: {', '.join(added)}")
+    else:
+        print("  textures.xml 已包含全部图标，无需改动")
 
 
 if __name__ == "__main__":
