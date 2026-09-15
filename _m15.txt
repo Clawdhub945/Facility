@@ -1,0 +1,58 @@
+通用 UI 模板（任意尺寸建筑可复用）—— 可行性已验证 + 四种行类型落地
+
+## 用户要求
+「无论是 2×2、3×3，还是 N×N，UI 来一个全新模板，可以被后续多个建筑来自定义 UI 里的内容」
+先做「运行时构建 uGUI 会不会崩游戏」的小实验，再定模板内容。
+
+## ① 可行性实验（UiProbe.cs）
+背景：早前为下拉框做"金色描边"时**运行时新增 GameObject 把游戏搞崩过**
+（进档静默退出，连 ErrorLog 都没写）。那次是带 `SpriteRenderer` 的物体。
+本次验证**纯 uGUI**，五步全通过：
+```
+UI 实验 ① 新建 GameObject 成功
+UI 实验 ② SetParent 成功
+UI 实验 ③ RectTransform 配置成功
+UI 实验 ④ Image 底板成功
+UI 实验 ⑤ TextMeshProUGUI 成功
+```
+游戏稳定运行 —— **运行时构建 uGUI 可行**；但**带 SpriteRenderer 的物体仍然不要做**。
+
+## ② UI 控件调研（决定模板能提供哪些"行"）
+* 有：`TextMeshProUGUI` / `IconText` / `IconTextNum` / `StuffIconNum` / `NumAdjust` /
+  `MyCheckBox` / `MyDropdown` / `TMP_Dropdown` / `StuffIconDropdown` /
+  `MyProgressBar` / `GridLayoutGroup` / `ScrollRect` / `Mask` / `LayoutElement`
+* **没有**：`VerticalLayoutGroup` / `HorizontalLayoutGroup` / `ContentSizeFitter`
+  → 所以竖排列表**必须自己算坐标**（模板就是这么做的）
+
+## ③ 模板实现
+**数据模型 `UiLayout.cs`**：建筑只描述"显示什么"，四种行：
+| 行 | 内容 | 数据来源 |
+|---|---|---|
+| `UiLabelRow` | 纯文字（可次要色） | 静态文字 |
+| `UiItemRow` | **图标+数量**（自动换行） | 建筑仓库 / 配方需求 |
+| `UiStatusRow` | 状态文字（**绿=正常/红=异常**） | `SmelterConsumer.BlockReason` |
+| `UiProgressRow` | **自绘进度条** + 百分比 | 燃料余量 / 今日开工 / 固定值 |
+
+**渲染器 `UiTemplate.cs`**：
+* 结构 `root(ScrollRect) → viewport(Mask) → content(自上而下排行)`
+* **按状态签名刷新**（每帧调用但内容没变不重建）—— 性能与防闪烁
+* 物品图标 `物品id → D.Ins.stuff_dic → stuff_img → SpriteManager.Get()`，取不到画占位块
+* 配色照游戏面板（深底 + 暖白文字）；底板 `raycastTarget=true` 挡穿透点击
+* **布局与占地尺寸无关** → 2×2 / 3×3 / N×N 共用
+
+**已同时接到两座高炉**（2×2 与 3×3）—— 用同一模板，验证"与尺寸无关"。
+
+## ④ 踩坑
+* 窗口 `rect.height` 是布局前初始值 → 日志出现「面板 526×**-96**」（负高度）；
+  加下限保护 + `Mathf.Abs` 兜底
+* **F12 热键游戏收不到**（`keybd_event` 无效，F10/F8 正常）→ 改成"详细模式下开窗自动跑一次"
+* 诊断日志每帧刷 → 按窗口实例 ID 去重（`_diagDone`）
+
+## ⑤ 新增文档
+`docs/UI模板.md`：可行性结论表、控件调研、设计、四种行类型、踩坑、给新建筑配 UI 的步骤。
+将来加"数值调节/勾选/按钮"行时，只需在 `UiLayout.cs` 加 `UiRow` 子类 +
+`UiTemplate.RenderRow` 加一个 `case`。
+
+## 待用户验证
+自动开窗一直被「联机帝国」弹窗挡住，未能截图确认视觉 —— 需用户在游戏里打开
+高炉窗口看模板效果（两座高炉都配了）。

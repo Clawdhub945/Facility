@@ -35,11 +35,32 @@ internal static class SmelterConsumer
     private static readonly Dictionary<int, string> _lastBlockReason = new();
 
     /// <summary>换日时清空当日标记</summary>
-    internal static void OnNewDay() => _doneToday.Clear();
+    internal static void OnNewDay() { _doneToday.Clear(); _workedToday.Clear(); }
 
     /// <summary>某座建筑今天没开工的原因（空串 = 正常）</summary>
     internal static string BlockReason(int guid)
         => _lastBlockReason.TryGetValue(guid, out var r) ? r : "";
+
+    /// <summary>某座建筑今天是否已经开工过（供 UI 模板显示进度）</summary>
+    internal static bool WorkedToday(int guid) => _workedToday.Contains(guid);
+
+    /// <summary>
+    /// 取建筑仓库的物品字典（`物品id → 数量`）。
+    /// 暴露给 UI 模板复用 —— 模板需要列库存，不该再实现一遍反射。
+    /// 拿不到返回 null。
+    /// </summary>
+    internal static System.Collections.IDictionary? BagDictionaryOf(Facility f)
+    {
+        try
+        {
+            var bag = GetBag(f);
+            return bag == null ? null : GetStuffDic(bag);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>今天已开工的建筑 guid</summary>
+    private static readonly HashSet<int> _workedToday = new();
 
     /// <summary>
     /// 给所有「配置了冶炼规格」的建筑结算一天。
@@ -122,6 +143,7 @@ internal static class SmelterConsumer
             try { f.RecordProduct(r.OutputId, r.OutputCount); } catch { }
 
             _lastBlockReason[guid] = "";
+            _workedToday.Add(guid);
             Plugin.LogV($"[Facility] 高炉 guid={guid} 开工：消耗 {Describe(r.Inputs)} + 燃料{r.FuelId}×{r.FuelPerBatch}" +
                         $" → 产出 {r.OutputId}×{r.OutputCount}");
             return true;

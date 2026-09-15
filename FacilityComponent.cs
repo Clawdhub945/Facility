@@ -25,6 +25,9 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>F10 = 打开建筑窗口（无人值守测试用）</summary>
     private bool _openKeyLatch;
 
+    /// <summary>F12 = UI 构建实验开关</summary>
+    private bool _uiProbeLatch;
+
     /// <summary>预制体清单只打一次（找游戏自带 UI 预制体用）</summary>
     private bool _dumpedPrefabs;
 
@@ -137,6 +140,18 @@ public class FacilityComponent : MonoBehaviour
 
             // F10 = 打开建筑窗口（无人值守测试用，OS 级鼠标点击标定太脆）。
             // **Shift+F10** = 打开「熔炉对照实验」(105052)，用来和 3×3 高炉做对照。
+            // F12 = UI 构建实验（切换显示自建小组件）。
+            // 只在 cfg 详细模式开启时生效 —— 这是「运行时构建 uGUI 会不会崩游戏」的验证开关。
+            bool down12 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F12);
+            if (down12 && !_uiProbeLatch)
+            {
+                if (Plugin.VerboseEntry?.Value == true)
+                    UiProbe.Toggle(FacilityWindowUi.CurrentWindowForProbe());
+                else
+                    Plugin.LogV("[Facility] UI 实验需要打开 cfg「调试.日志详细模式」");
+            }
+            _uiProbeLatch = down12;
+
             bool down10 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F10);
             if (down10 && !_openKeyLatch)
             {

@@ -57,6 +57,13 @@ internal sealed class BuildingSpec
     /// </summary>
     internal SmeltingRecipe? Smelting { get; init; }
 
+    /// <summary>
+    /// **通用 UI 模板的布局**（null = 这座建筑不用模板）。
+    /// 见 <see cref="UiLayout"/> / <see cref="UiTemplate"/>：
+    /// 只描述"要显示哪些行"，模板负责画 —— 与占地尺寸无关，多座建筑各自独立。
+    /// </summary>
+    internal UiLayout? Ui { get; init; }
+
     /// <summary>自定义外观（贴图前缀）；null = 用原版外观</summary>
     internal string? CustomSpritePrefix { get; init; }
 }
@@ -160,6 +167,19 @@ internal static class Buildings
         HideControls = Array.Empty<string>(),
         RewriteWindowTexts = false,
         CustomSpritePrefix = null,
+        // 同一套**通用 UI 模板**（2×2 与 3×3 共用，证明模板与占地尺寸无关）；
+        // 配方下拉与燃料设置走窗口自带控件。
+        Ui = new UiLayout
+        {
+            Rows =
+            {
+                new UiLabelRow { Label = "配方", Text = "铁锭 ×2 → 钢 ×1（原生熔炉机制）" },
+                new UiLabelRow { Label = "提示", Text = "燃料（煤）要放进本建筑仓库才会生效",
+                                 Secondary = true },
+                new UiStatusRow { Label = "说明", Source = UiStatusSource.Static,
+                                  StaticText = "配方下拉与「设置燃料类型」都是游戏原生控件" },
+            },
+        },
     };
 
     /// <summary>
@@ -197,6 +217,20 @@ internal static class Buildings
             FuelPerBatch = 1,
             OutputId = 603010,        // 钢
             OutputCount = 1,
+        },
+        // ★ 通用 UI 模板的布局（第一座用模板的建筑）
+        Ui = new UiLayout
+        {
+            Rows =
+            {
+                new UiLabelRow { Label = "配方", Text = "铁锭 ×2 + 煤 ×1 → 钢 ×1" },
+                new UiLabelRow { Label = "需要", Text = "把铁锭与煤放进本建筑仓库" },
+                new UiItemRow  { Label = "配方材料", Source = UiItemSource.RecipeRequirement },
+                new UiItemRow  { Label = "库存", Source = UiItemSource.BuildingBag },
+                new UiStatusRow { Label = "状态", Source = UiStatusSource.SmelterBlockReason,
+                                  OkText = "已冶炼（今日）", FailText = "未开工" },
+                new UiProgressRow { Label = "燃料余量", Source = UiProgressSource.FuelRatio },
+            },
         },
     };
 

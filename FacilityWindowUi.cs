@@ -123,10 +123,34 @@ internal static class FacilityWindowUi
             DumpBoundFacility(window);
             DumpFurnaceRecipeDropdown(window);
             DumpAllDropdowns(window);
+
+            // 运行时构建 uGUI 的能力验证（详细模式下自动跑一次）
+            UiProbe.AutoOnce(window);
         }
 
         // 不是本 mod 的建筑 → 一律不碰（fail-safe）
         if (spec == null) return;
+
+        // 记录「当前打开的本 mod 窗口」—— UI 构建实验（F12）与将来的 UI 模板
+        // 都需要一个挂载点；这里顺手记下来比事后扫场景可靠。
+        try
+        {
+            if (window.activeInHierarchy)
+            {
+                _currentWindow = window;
+                _currentSpec = spec;
+                _currentFacility = FindFacilityByGuid(guid);
+            }
+        }
+        catch { }
+
+        // ★ 通用 UI 模板：建筑在自己规格里写了 UiLayout 才渲染。
+        //   与占地尺寸无关（2×2 / 3×3 / N×N 同一套模板），多座建筑各自独立。
+        if (spec.Ui != null)
+        {
+            try { UiTemplate.Render(window, spec, _currentFacility); }
+            catch (Exception ex) { Plugin.LogV($"[FacilityUI] UI 模板渲染失败: {ex.Message}"); }
+        }
 
         // ① 按**该建筑自己的规格**隐藏控件 —— 只在**首次**处理这个窗口时做一次。
         //
@@ -652,6 +676,33 @@ internal static class FacilityWindowUi
 
     private static string _lastApplyKey = "";
 
+    /// <summary>最近一次处理过的本 mod 建筑窗口（UI 构建实验 / 模板的挂载点）</summary>
+    private static GameObject? _currentWindow;
+
+    /// <summary>最近一次处理过的建筑规格（模板要知道给谁渲染）</summary>
+    private static BuildingSpec? _currentSpec;
+
+    /// <summary>最近一次处理过的建筑实例（UI 模板要用它的 bag / guid）</summary>
+    private static Facility? _currentFacility;
+
+    /// <summary>按 guid 找场景里的设施实例</summary>
+    private static Facility? FindFacilityByGuid(int guid)
+    {
+        if (guid == 0) return null;
+        try
+        {
+            foreach (var f in UnityEngine.Object.FindObjectsOfType<Facility>())
+            {
+                if (f == null) continue;
+                int g = 0;
+                try { g = f.guid; } catch { }
+                if (g == guid) return f;
+            }
+        }
+        catch { }
+        return null;
+    }
+
     /// <summary>已做过详细诊断的窗口（避免每帧刷屏）</summary>
     private static readonly System.Collections.Generic.HashSet<int> _diagDone = new();
 
@@ -670,6 +721,20 @@ internal static class FacilityWindowUi
             return sb.ToString();
         }
         catch { return "?"; }
+    }
+
+    /// <summary>
+    /// 当前打开的本 mod 建筑窗口（供 UI 构建实验 / 模板定位挂载点）。
+    /// 由 `Apply` 在每次处理窗口时更新；窗口关闭后 Unity 的 `== null` 判断会成立。
+    /// </summary>
+    internal static GameObject? CurrentWindowForProbe()
+    {
+        try
+        {
+            if (_currentWindow == null || !_currentWindow) { _currentWindow = null; return null; }
+            return _currentWindow.activeInHierarchy ? _currentWindow : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>供安全护栏补丁复用（判断窗口是否属于本 mod 建筑）</summary>
