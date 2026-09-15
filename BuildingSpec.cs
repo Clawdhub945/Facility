@@ -71,7 +71,11 @@ internal static class Buildings
         Name = "综合生产所",
         WindowPrefab = "window_gatherers_hut",
         DailyProducer = true,
-        FillExtraProductDropdown = false,            // 该窗口没有原生下拉
+        // ⚠ 这座**没有**原生下拉（`window_gatherers_hut` 里没有 `dp_blueprint`），
+        //   用本 mod **自绘**的「额外产品」选择条 —— 必须为 true 才会画。
+        //   踩过：这个开关原来写 false，而"是否画自绘条"却由「窗口里有没有覆盖率文本」
+        //   决定 → 借同一个窗口的别的建筑（3×3 高炉）也被画上了下拉，看起来像生产所。
+        FillExtraProductDropdown = true,
         HideControls = Array.Empty<string>(),        // 采集营地窗口本来就是我们要的样子
         RewriteWindowTexts = true,
     };

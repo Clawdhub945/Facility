@@ -116,7 +116,14 @@ internal static class FacilityWindowUi
             }
             catch { }
         }
-        if (Plugin.VerboseEntry?.Value == true) { DumpBoundFacility(window); DumpFurnaceRecipeDropdown(window); DumpAllDropdowns(window); }
+        // 诊断去重：同一个窗口只打一次
+        // （窗口开着时 `Apply` 被刷新方法**每帧**调用，不去重会把日志刷爆）
+        if (Plugin.VerboseEntry?.Value == true && _diagDone.Add(window.GetInstanceID()))
+        {
+            DumpBoundFacility(window);
+            DumpFurnaceRecipeDropdown(window);
+            DumpAllDropdowns(window);
+        }
 
         // 不是本 mod 的建筑 → 一律不碰（fail-safe）
         if (spec == null) return;
@@ -146,9 +153,15 @@ internal static class FacilityWindowUi
         // 用来回答「下拉去哪了 / 我隐藏了什么」，不靠猜。
         if (Plugin.VerboseEntry?.Value == true) { DumpHidden(window); DumpDropdownChain(window); }
 
-        // ④ 自绘选择条：**只在没有原生下拉的建筑上才用**（保底方案）。
-        //   有原生下拉（FillExtraProductDropdown）的建筑不该再画一条，否则两套 UI 打架。
-        if (spec.FillExtraProductDropdown) return;
+        // ④ 自绘选择条（「额外产品」那条）：**只给声明了要它的建筑画**。
+        //
+        // ⚠⚠ 这里踩过一个坑：原来只判断「窗口里有没有 `txt_forest_coverage_rate`」，
+        //   而这是**采集营地窗口**的固有文本 —— 于是任何借 `window_gatherers_hut`
+        //   的建筑（例如 3×3 高炉）都被画上了一条「额外产品」下拉，
+        //   看起来就跟生产所一模一样（用户实测反馈「新建的 3×3 高炉功能和之前的生产所一样，
+        //   UI 还是乱的」）。
+        //   **判据必须用建筑规格，不能用窗口内容。**
+        if (!spec.FillExtraProductDropdown) return;
 
         var coverage = FindText(window, "txt_forest_coverage_rate");
         if (coverage == null) return;
@@ -638,6 +651,9 @@ internal static class FacilityWindowUi
     }
 
     private static string _lastApplyKey = "";
+
+    /// <summary>已做过详细诊断的窗口（避免每帧刷屏）</summary>
+    private static readonly System.Collections.Generic.HashSet<int> _diagDone = new();
 
     /// <summary>窗口上挂的组件名清单（诊断用，用来确认窗口类型判断对不对）</summary>
     private static string ComponentNames(GameObject window)

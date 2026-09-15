@@ -58,6 +58,7 @@ internal static class SmelterConsumer
         if (all == null) return 0;
 
         int worked = 0;
+        int candidates = 0;
         foreach (var f in all)
         {
             if (f == null) continue;
@@ -65,9 +66,13 @@ internal static class SmelterConsumer
             try { sid = f.stuff_id; } catch { }
             var spec = Buildings.ByStuffId(sid);
             if (spec?.Smelting == null) continue;
-
+            candidates++;
+            Plugin.LogV($"[Facility] 冶炼炉候选：guid={SafeGuid(f)} stuff_id={sid} 规格「{spec.Name}」");
             if (ProcessOne(f, spec, spec.Smelting)) worked++;
         }
+        if (worked == 0)
+            Plugin.LogV($"[Facility] 本日无冶炼产出（候选炉子 {candidates} 座；" +
+                        $"原因见上方的「未开工」日志）");
         return worked;
     }
 
