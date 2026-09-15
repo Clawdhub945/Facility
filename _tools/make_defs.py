@@ -56,6 +56,26 @@ SUPER_IMG_ON_MAP = "super_factory_0"     # 场景贴图：我们自己新增的�
 SUPER_TECH_ID = 0
 SUPER_TXT_ID = 300                    # 建造菜单分类段号（与旧建筑同用「食品」段）
 
+# ---------------------------------------------------------------------------
+# 实验建筑 105051：3×3 高炉兼容性实验
+#
+# 目的：验证「3×3 占地 + 熔炉机制（FacilityFurnace）+ 熔炉窗口」能不能共存。
+# 背景：熔炉(105028) 原生是 **2×2**、矿井(105013) 是 **3×3**；
+#       熔炉的 `CreateMaterialsPosList` 会按格子摆材料位置，**对占地可能有硬假设**。
+#       若这个组合能跑，工业 mod 的「高炉烧煤（煤=燃料）」就能做成 3×3。
+#
+# 骨架：`mine`（3×3），类：`FacilityFurnace`，窗口：`window_furnace`
+# ---------------------------------------------------------------------------
+FURNACE3_ID = 105051
+FURNACE3_NAME = "三乘三高炉实验"
+FURNACE3_DESC = "兼容性实验建筑：3×3 占地 + 熔炉机制。用于验证尺寸是否兼容。"
+FURNACE3_PREFAB = "mine"              # 3×3 骨架（矿井）
+FURNACE3_CLASS = "FacilityFurnace"    # 熔炉机制（燃料 + 生产计划）
+FURNACE3_WINDOW = "window_furnace"
+FURNACE3_IMG = "ui_105013"   # 暂借矿井图标（保证菜单里不是白块）
+FURNACE3_IMG_ON_MAP = "mine_0"
+FURNACE3_CELL = 3
+
 TEST_DIR = Path(r"C:\TerritoryModTest")
 DEF_DEPLOY_DIR = TEST_DIR / "Defs"
 TEX_DEPLOY_DIR = TEST_DIR / "Textures"
@@ -66,7 +86,7 @@ DEFAULT_PRODUCTS = [(604001, 10, "原木"), (605001, 10, "石料")]
 DEFAULT_EXTRA_CANDIDATES = [(616001, "铁矿"), (616002, "秘银矿"), (612001, "红宝石")]
 # formula_id 槽位基数：官方惯例 formula_id = product_id*100 + 序号；
 # 105040 用 40 起、105050 用 50 起，跟官方 206 行都不冲突，也便于一眼认出是本 mod 的行。
-FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50}
+FORMULA_SLOT_BASE = {MOD_ID: 40, SUPER_ID: 50, FURNACE3_ID: 51}
 
 # 建筑外观预设（只对旧建筑 105040 生效；新建筑用 mod 自带贴图）：
 # stuff.json 的 prefab / stuff_img / stuff_img_on_map 都换成目标建筑的资源名。
@@ -187,6 +207,22 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         r.update({"facility_id": sid, "manpower_limit": 4, "is_main_facility": 0})
         return r
 
+    def furnace3_build_row(guide):
+        """实验建筑：3×3 + 熔炉机制 + 熔炉窗口。
+        必须显式覆盖 `class_name` / `window_prefab`，否则会继承采集营地那一套。"""
+        r = build_row(FURNACE3_ID, FURNACE3_PREFAB, guide, FURNACE3_CELL, FURNACE3_CELL)
+        r.update({
+            "class_name": FURNACE3_CLASS,
+            "window_prefab": FURNACE3_WINDOW,
+            "have_worker": 1,          # 熔炉是有人工作的
+            "must_have_worker": 1,
+            "has_bag": "1",            # 熔炉自带仓库（放原料/燃料）
+            "res_range": 0,            # 不做采集范围
+            "res_range_anchor": 0,
+            "menu_group": 3,          # ⚠ 必须与 tech 的 txt_id=3700（制造段）配对
+        })
+        return r
+
     guide_common = ("安排工人后，每个工人每天稳定产出资源\n"
                     "# 产出内容与数量在 BepInEx/config/claude.facility.cfg 配置\n"
                     "# 工人越多，每日产出越多；产出会自动入库")
@@ -196,11 +232,16 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         stuff_row(MOD_ID, NAME, DESC, img, img_on_map, prefab),
         # 超级生产所：自定义外观（prefab 借用 workbench，贴图由 DLL 运行时换成我们自己的）
         stuff_row(SUPER_ID, SUPER_NAME, SUPER_DESC, SUPER_IMG, SUPER_IMG_ON_MAP, SUPER_PREFAB),
+        # 实验：3×3 高炉（骨架 mine、机制 FacilityFurnace、窗口 window_furnace）
+        stuff_row(FURNACE3_ID, FURNACE3_NAME, FURNACE3_DESC,
+                  FURNACE3_IMG, FURNACE3_IMG_ON_MAP, FURNACE3_PREFAB),
     ]
     build_rows = [
         build_row(MOD_ID, prefab, guide_common, 3, 3),
         # 超级生产所：3×2（用户要求），door_way=1234 与采集营地同款
         build_row(SUPER_ID, SUPER_PREFAB, guide_common, 3, 2, door_way=1234),
+        # 实验建筑：3×3；class/window 用熔炉那一套（要覆盖 build_row 的默认值）
+        furnace3_build_row(guide_common),
     ]
     # tech 行的 txt_id 是「分类段号」必须与 menu_group 配对——
     # 100=初始(0) 200=住所(1) 300=食品(2) 3700=制造(3) 1500=物流(4) 600=路桥(7)。
@@ -211,8 +252,12 @@ def build_all(appearance: str = DEFAULT_APPEARANCE):
         {"txt_id": SUPER_TXT_ID, "tech_id": SUPER_TECH_ID, "facility_id": SUPER_ID,
          "seed_id": "", "event_id": "",
          "tech_desc_zh-CN": "建造超级生产所：红砖厂房，产量与综合生产所一致"},
+        # 实验建筑：放在「制造」段（3700）便于和制造台一起找；免科技
+        {"txt_id": 3700, "tech_id": 0, "facility_id": FURNACE3_ID,
+         "seed_id": "", "event_id": "",
+         "tech_desc_zh-CN": "建造三乘三高炉实验"},
     ]
-    career_rows = [career_row(MOD_ID), career_row(SUPER_ID)]
+    career_rows = [career_row(MOD_ID), career_row(SUPER_ID), career_row(FURNACE3_ID)]
 
     blueprint_rows = (make_blueprints(bp_table, stuff_type_by_id, MOD_ID, products_for(MOD_ID)) +
                       make_blueprints(bp_table, stuff_type_by_id, SUPER_ID, products_for(SUPER_ID)))

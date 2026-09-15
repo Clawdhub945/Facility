@@ -1,0 +1,42 @@
+实验：新增 105051「三乘三高炉实验」—— 验证 3×3 占地 + 熔炉机制能否共存
+
+## 背景（为工业 mod 铺路）
+用户要做工业 mod，第一座是 **3×3 高炉**，配方 = 原版煤炭 + 铁锭 → 钢。
+煤按**燃料**用（煤的 remark 就是「燃料系数」，effect_value=5.0）。
+
+调研发现游戏有**两套制作机制**：
+  * 工坊配方：制造台/缝纫台/磨坊 → 数据源 `blueprint.json`
+  * 熔炉生产计划：熔炉/矿井 → 数据源 `FacilityFurnace.stuff_plan_dic`（不是 blueprint）
+熔炉**原生支持燃料**（`fuel_day_cost_of_furnace` × `Game.w.fuel_consumption_rate`、
+`stuff_id_list_of_fuel`、`dp_default_fuel`、`remain_fuel`/`max_fuel`），
+正是「高炉烧煤」需要的。
+
+**但熔炉原生是 2×2、矿井是 3×3**，而熔炉的 `CreateMaterialsPosList` 会按格子摆材料位置，
+**对占地可能有硬假设** → 这就是本实验要验的东西。
+
+## 本实验建筑
+| 项 | 值 |
+|---|---|
+| id | **105051**（1050xx 段空闲） |
+| 名称 | 三乘三高炉实验 |
+| 占地 | **3×3** |
+| 骨架 prefab | `mine`（矿井，3×3） |
+| class_name | **`FacilityFurnace`**（熔炉机制：燃料 + 生产计划） |
+| window_prefab | **`window_furnace`** |
+| 图标 | 暂借 `ui_105013`（保证菜单不白块） |
+| menu_group / txt_id | 3 / 3700（制造段，**必须配对**，否则不进建造菜单） |
+| have_worker / must_have_worker / has_bag | 1 / 1 / "1"（熔炉是有工人、自带仓库的） |
+| 科技 | 免科技（tech_id=0） |
+
+## 代码侧
+`Plugin.Furnace3TestId = 105051` 并加入 `ManagedFacilityIds`
+（只为窗口归属判断 + 不误伤原版窗口；它**不参与**每日产出逻辑，因为它不是 FacilityGatherersHut）。
+
+## 新增工具
+`_tools/exp_furnace3.py`：自动放置实验建筑并尝试开窗。
+
+## 待验证（需人工操作，因为自动开窗被「自动弹出的帝国地图」挡住）
+1. 游戏里建造菜单「制造」分类能不能看到「三乘三高炉实验」
+2. 能不能放下（3×3 占地）
+3. 放好后窗口能不能正常打开（`window_furnace` + FacilityFurnace 机制）
+4. 有没有崩溃 / 空引用 / 材料位置错乱

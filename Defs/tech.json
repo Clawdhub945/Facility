@@ -13,5 +13,13 @@
     "seed_id": "",
     "event_id": "",
     "tech_desc_zh-CN": "建造超级生产所：红砖厂房，产量与综合生产所一致"
+  },
+  {
+    "txt_id": 3700,
+    "tech_id": 0,
+    "facility_id": 105051,
+    "seed_id": "",
+    "event_id": "",
+    "tech_desc_zh-CN": "建造三乘三高炉实验"
   }
 ]

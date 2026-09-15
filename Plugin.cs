@@ -28,8 +28,21 @@ public class Plugin : BasePlugin
     /// <summary>超级生产所的设施 id（自定义外观，挂在自己新建的科技节点 909050 下）</summary>
     public const int SuperFacilityId = 105050;
 
+    /// <summary>
+    /// 实验建筑 105051「三乘三高炉实验」：
+    /// 3×3 占地 + **熔炉机制**（`FacilityFurnace`）+ 熔炉窗口（`window_furnace`）。
+    ///
+    /// 目的：验证工业 mod 要用的「高炉烧煤（煤当燃料）」能不能做成 3×3。
+    /// 背景：熔炉原生是 2×2、矿井是 3×3；而熔炉的 `CreateMaterialsPosList`
+    /// 会按格子摆材料位置，**对占地可能有硬假设** —— 这个实验就是来验它的。
+    ///
+    /// ⚠ 它**不参与**本 mod 的每日产出逻辑（不是 `FacilityGatherersHut`）；
+    /// 放进 <see cref="ManagedFacilityIds"/> 只为两件事：窗口归属判断、不误伤原版窗口。
+    /// </summary>
+    public const int Furnace3TestId = 105051;
+
     /// <summary>本 mod 管辖的全部设施 id（产出循环 / 工位数补丁 / 窗口 UI 都用它判归属）</summary>
-    public static readonly int[] ManagedFacilityIds = { FacilityId, SuperFacilityId };
+    public static readonly int[] ManagedFacilityIds = { FacilityId, SuperFacilityId, Furnace3TestId };
 
     /// <summary>该设施是否由本 mod 添加</summary>
     public static bool IsManaged(int stuffId)
