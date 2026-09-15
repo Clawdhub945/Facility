@@ -1,0 +1,51 @@
+修「熔炉配方下拉为空」：护栏过度拦截（护栏副作用比崩溃更难查）
+
+## 用户反馈
+「配方下拉没有出现」/「还是没配方」
+
+## 排查过程（三层，最终定位在**我自己加的护栏**上）
+1. 数据层：查游戏**运行时**的配方表（新增 `PrefabProbe.DumpRecipeTables()`）：
+   ```
+   blueprint_dic 共 202 条，其中本 mod 的 24 条
+       facility_id=105028 → 7 条（原生熔炉）
+       facility_id=105052 → 7 条（我们的对照建筑，一样多）
+   blueprint_list_dic_by_facility 共 30 个键
+       facility_id=105052 → 有，7 条
+   ```
+   → **数据完全正常**，问题在 UI 侧。
+2. UI 层：枚举窗口里**所有** `TMP_Dropdown`（新增 `DumpAllDropdowns()`）：
+   ```
+   [1] work_mode/dp_work_mode        选项=2  工作类型：冶炼金属
+   [2] formula_item_main/dp_blueprint 选项=0  ← 配方下拉（空）
+   ```
+   确认配方下拉就是 `WindowWorkshop.dp_blueprint`，由
+   `SetInfo → InitDpBlueprint → InitWorkshopOptionData` 填充
+   （数据源 `D.Ins.blueprint_list_dic_by_facility`）。
+3. **根因**：我早前为消除空引用，把 `InitDpBlueprint` / `SetInfo` 整条加进了
+   `NativeWindowSafetyPatch` 的跳过名单 —— **于是配方下拉永远填不上**。
+   `factory`（护栏）的副作用是"窗口悄悄少掉功能"，**比崩溃更难发现**。
+
+## 修法
+护栏判据从「是我们的窗口 → 跳过」收窄为
+「是我们的窗口 **且窗口确实缺 `workshop` 对象** → 跳过」：
+* 新增 `NeedsWorkshopButMissing(window)`：读窗口的 `workshop` 字段；
+  读不到该字段 → 不算缺（放行）；有字段但为 null → 跳过（那种情况才会崩）
+* 从名单里**移除** `WindowWorkshop.SetInfo`（整段跳过太粗暴）
+* 保留其余必要护栏（`ShowWindowTip` 等）
+
+## 实测（全绿）
+```
+formula_item_main/dp_blueprint  选项=8  显示值=铁锭 x50 <= 铁矿 x100  active=True
+最近 300 行日志: 无空引用 ✔
+```
+截图确认：熔炉对照实验窗口的配方下拉正常显示「铁锭 x50 <= 铁矿 x100」。
+
+## 结论（工业 mod 技术路线最终确认）
+高炉 = **原生熔炉骨架（`furnace`，2×2）+ `FacilityFurnace` + `window_furnace`**，
+燃料交互与配方下拉**全部原生可用**；配方通过 `clone_facility_blueprints()`
+从原生熔炉克隆（或写成我们自己的配方，如「煤+铁锭→钢」）。
+
+## 新增诊断工具（都是这次定位问题的关键）
+* `PrefabProbe.DumpRecipeTables()` —— 查游戏运行时配方表（按 formula_id / facility_id 两个索引）
+* `FacilityWindowUi.DumpAllDropdowns()` —— 枚举窗口里所有 TMP_Dropdown 的路径/选项数/显示值
+* `_tools/probe_fields.py` —— 从反编译语料库提取某个类的字段访问（找"某个 UI 归哪个组件管"）

@@ -116,7 +116,7 @@ internal static class FacilityWindowUi
             }
             catch { }
         }
-        if (Plugin.VerboseEntry?.Value == true) DumpBoundFacility(window);
+        if (Plugin.VerboseEntry?.Value == true) { DumpBoundFacility(window); DumpFurnaceRecipeDropdown(window); DumpAllDropdowns(window); }
 
         // 不是本 mod 的建筑 → 一律不碰（fail-safe）
         if (spec == null) return;
@@ -550,6 +550,92 @@ internal static class FacilityWindowUi
 
     /// <summary>guid → 建筑规格 的缓存（拆除/换档时由 InvalidateManagedGuids 一起清）</summary>
     private static readonly System.Collections.Generic.Dictionary<int, BuildingSpec?> _specByGuid = new();
+
+    /// <summary>
+    /// 诊断（详细模式）：打印**熔炉窗口里配方下拉**的项数。
+    /// 用于区分「配方数据没进游戏」和「数据进了但 UI 没显示」两种情况 ——
+    /// 实测 lueprint_list_dic_by_facility[105052] 有 7 条，
+    /// 所以若这里显示 0 项，就是 UI 侧的问题（窗口字段没绑上/没刷新）。
+    /// </summary>
+    private static void DumpFurnaceRecipeDropdown(GameObject window)
+    {
+        try
+        {
+            if (window.name != "window_furnace") return;
+            var sb = new System.Text.StringBuilder($"[FacilityUI] 熔炉窗口配方下拉诊断:\n");
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c == null) continue;
+                var t = c.GetType();
+                object? dd = null;
+                try
+                {
+                    var fi = t.GetField("dp_blueprint") ?? t.GetField("dp_formula")
+                             ?? t.GetField("dropdown");
+                    if (fi != null) dd = fi.GetValue(c);
+                    if (dd == null)
+                    {
+                        var pi = t.GetProperty("dp_blueprint");
+                        if (pi != null) dd = pi.GetValue(c);
+                    }
+                }
+                catch { }
+                if (dd is TMPro.TMP_Dropdown td)
+                {
+                    int n = 0; string shown = "?";
+                    try { n = td.options.Count; } catch { }
+                    try { shown = td.captionText != null ? td.captionText.text : "(null)"; } catch { }
+                    sb.Append($"  组件{t.Name}.{td.name}: 选项 {n} 项，显示值={shown}，" +
+                              $"active={td.gameObject.activeInHierarchy}\n");
+                }
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 配方下拉诊断失败: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 诊断（详细模式）：枚举窗口里**所有** `TMP_Dropdown`，打印路径 / 选项数 / 显示值。
+    ///
+    /// ## 为什么需要
+    /// 熔炉窗口（`window_furnace`）的「配方下拉」是空的，而原生熔炉有值。
+    /// 已知数据侧没问题（`blueprint_list_dic_by_facility[105052]` 有 7 条），
+    /// 所以问题在**UI 侧**：必须知道窗口里到底有几个下拉、哪个才是配方下拉。
+    /// 之前只看了 `WindowWorkshop.dp_blueprint`（0 项）—— 那是**工坊基类**的字段，
+    /// 不一定是熔炉用的那个。
+    /// </summary>
+    private static void DumpAllDropdowns(GameObject window)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder($"[FacilityUI] 窗口 {window.name} 的下拉枚举:\n");
+            int n = 0;
+            foreach (var td in window.GetComponentsInChildren<TMPro.TMP_Dropdown>(true))
+            {
+                if (td == null) continue;
+                n++;
+                int cnt = 0;
+                string shown = "?";
+                try { cnt = td.options.Count; } catch { }
+                try { shown = td.captionText != null ? td.captionText.text : "(null)"; } catch { }
+                sb.Append($"  [{n}] 路径={DiagPathOf(td.transform, window.transform)}")
+                  .Append($" go={td.gameObject.name}")
+                  .Append($" 选项={cnt} 显示值={shown}")
+                  .Append($" active={td.gameObject.activeInHierarchy}\n");
+            }
+            if (n == 0) sb.Append("  （没有 TMP_Dropdown）\n");
+
+            // 顺带把熔炉特有的几个字段对象在不在也打一下
+            foreach (var fname in new[] { "go_formula", "stock_adjust_list_view",
+                                          "panel_stuff_stock_adjust", "stuff_content_root" })
+            {
+                var go = NativeUi.FindGo(window, fname, true);
+                sb.Append($"  字段 {fname}: {(go == null ? "【null/找不到】" : go.name + $" active={go.activeInHierarchy}")}\n");
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 下拉枚举失败: {ex.Message}"); }
+    }
 
     private static string _lastApplyKey = "";
 

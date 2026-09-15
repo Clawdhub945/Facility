@@ -31,28 +31,28 @@ namespace FacilityMod;
 [HarmonyPatch]
 internal static class NativeWindowSafetyPatch
 {
-    /// <summary>需要护栏的「窗口类.方法名」清单</summary>
+    /// <summary>
+    /// 需要护栏的「窗口类.方法名」清单。
+    ///
+    /// ## ⚠ 护栏是"最后手段"，能不用就不用
+    /// 实测教训：把 `InitDpBlueprint` 护栏掉之后，**熔炉的配方下拉永远是空的** ——
+    /// 因为原生熔炉的配方下拉正是由这条链填充的
+    /// （数据源 `D.Ins.blueprint_list_dic_by_facility[facility_id]`，
+    /// 实测我们的 105052 在该索引里**有 7 条**）。
+    /// 护栏的副作用是"窗口少了功能"，比崩溃更难发现。
+    ///
+    /// 所以现在改成**按条件跳过**：只有窗口的 `workshop` 字段确实为 null 时才跳过
+    /// （那种情况调下去必抛空引用，会让整个 SetInfo 中断）。
+    /// </summary>
     private static readonly (string Type, string Method)[] Guarded =
     {
-        // ShowWindowTip 系列：内部访问 this.workshop（制造台的工坊组件），
-        // 我们的建筑是 FacilityGatherersHut，没有这个对象 → 必崩。
         ("WindowWorkshop", "ShowWindowTip"),
         ("WindowWorkFacility", "ShowWindowTip"),
         ("WindowWorkFacilityWithStockAdjust", "ShowWindowTip"),
-
-        // 下拉初始化：`SetInfo → InitDpBlueprint → InitWorkshopOptionData(...)`
-        // 需要制造台的 `formula_list`（配方表），我们的建筑没有配方 → 传 null → 崩。
-        // **而且我们不需要它**：下拉的候选是我们自己用 NativeDropdown 填的。
         ("WindowWorkshop", "InitDpBlueprint"),
         ("WindowWorkshop", "UpdateAlternativeFormula"),
         ("WindowWorkshop", "Refresh"),
-
-        // ⚠ 实测报错：`WindowWorkshop.SetInfo` 中途抛
-        //   `System.NullReferenceException at WindowWorkshop.UpdateAutoMakeProductOfMaterials()`
-        //   → **SetInfo 中断** → 窗口控件停在默认值、回调没接上
-        //   → 表现就是用户说的「全是默认值且无法交互」。
         ("WindowWorkshop", "UpdateAutoMakeProductOfMaterials"),
-        ("WindowWorkshop", "SetInfo"),   // 兜底：整段 SetInfo 跳过（下拉我们自己填，不依赖它）
     };
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
@@ -98,8 +98,14 @@ internal static class NativeWindowSafetyPatch
     }
 
     /// <summary>
-    /// 是本 mod 的窗口就跳过原方法（避免空引用）；原版窗口照旧。
-    /// 用 `object __instance` 接，兼容多类型补丁。
+    /// 只在本 mod 的窗口**且确实会崩**时跳过原方法；其余一律放行。
+    ///
+    /// ⚠ 这里的判据从「是我们的窗口就跳过」收窄成「是我们的窗口**且缺必要对象**才跳过」——
+    /// 因为无脑跳过会让窗口**悄悄少掉功能**（实测：跳过 `InitDpBlueprint` →
+    /// 熔炉的配方下拉永远是空的，而数据其实都在）。
+    ///
+    /// 崩溃的根因是 `this.workshop == null`（我们的建筑借窗口预制体时，
+    /// 设施组件类型可能和窗口期望的不一致）→ 那种情况必须跳过，否则整个 SetInfo 中断。
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
     static bool Prefix(object __instance)
@@ -108,9 +114,44 @@ internal static class NativeWindowSafetyPatch
         {
             if (__instance is not Component c || c == null) return true;
             bool ours = FacilityWindowUi.IsOurWindowPublic(c.gameObject);
-            if (ours) return false;      // 跳过：我们没那套组件，调了必崩
+            if (!ours) return true;                     // 原版窗口：完全放行
+
+            // 是我们的窗口：只在「窗口上没有 workshop 对象」时跳过（否则必抛空引用）
+            if (NeedsWorkshopButMissing(c))
+            {
+                Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{_currentMethod}（窗口缺 workshop 对象）");
+                return false;
+            }
+            return true;
         }
         catch { }
         return true;
+    }
+
+    /// <summary>当前正在护栏的方法名（TargetMethods 时记录，仅用于日志）</summary>
+    private static string _currentMethod = "?";
+
+    /// <summary>
+    /// 窗口上需要 `workshop` 字段但它是 null 吗。
+    /// 读不到该字段（例如熔炉窗口本来就没这字段）→ 不算缺（放行，让它自己跑）。
+    /// </summary>
+    private static bool NeedsWorkshopButMissing(Component c)
+    {
+        try
+        {
+            var t = c.GetType();
+            object? v = null;
+            bool found = false;
+            var fi = t.GetField("workshop");
+            if (fi != null) { v = fi.GetValue(c); found = true; }
+            if (!found)
+            {
+                var pi = t.GetProperty("workshop");
+                if (pi != null) { v = pi.GetValue(c); found = true; }
+            }
+            if (!found) return false;        // 没这个字段 → 不是缺对象的问题 → 放行
+            return v == null;                // 有字段但为 null → 跳过（会崩）
+        }
+        catch { return false; }
     }
 }

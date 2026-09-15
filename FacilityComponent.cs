@@ -104,6 +104,7 @@ public class FacilityComponent : MonoBehaviour
             if (!_dumpedPrefabs && Time.frameCount > 120)
             {
                 _dumpedPrefabs = true;
+                PrefabProbe.DumpRecipeTables();
                 PrefabProbe.Dump("dropdown");
                 PrefabProbe.Dump("dp_item");
                 PrefabProbe.Dump("window_");
