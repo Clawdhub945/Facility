@@ -180,6 +180,45 @@ public class FacilityComponent : MonoBehaviour
         catch (Exception ex) { Plugin.LogV($"[Facility] 换日诊断失败: {ex.Message}"); }
     }
 
+    /// <summary>
+    /// 这座设施是不是「日常产出型」（本 mod 的 105040/105050 那种）。
+    ///
+    /// 判据顺序（**宁可放行也别误停产出**）：
+    ///   ① 反射读游戏自己的 `class_name` 字段 → 命中 `FacilityGatherersHut` 放行
+    ///   ② 读不到 → 用 stuff_id 白名单
+    ///
+    /// 为什么不用 C# 的 `is`：IL2CPP 里所有设施都是 interop 的 `Facility` 包装，
+    /// `f is FacilityGatherersHut` **永远为假** —— 踩过：害得综合生产所直接停产。
+    /// </summary>
+    private static bool IsDailyProducer(Facility f)
+    {
+        // ① 反射读 class_name（避免编译期字段名猜错导致停摆）
+        try
+        {
+            var t = f.GetType();
+            object? v = null;
+            var pi = t.GetProperty("class_name");
+            if (pi != null) v = pi.GetValue(f);
+            if (v == null)
+            {
+                var fi = t.GetField("class_name");
+                if (fi != null) v = fi.GetValue(f);
+            }
+            if (v is string s && !string.IsNullOrEmpty(s))
+                return s == "FacilityGatherersHut";
+        }
+        catch { }
+
+        // ② 兜底：stuff_id 白名单（只认本 mod 的日常产出建筑，实验建筑不入列）
+        try
+        {
+            int sid = f.stuff_id;
+            return sid == Plugin.FacilityId || sid == Plugin.SuperFacilityId;
+        }
+        catch { }
+        return false;
+    }
+
     private void ProduceForNewDay(int dayKey)
     {
         var products = Plugin.ParseProducts();
@@ -222,6 +261,26 @@ public class FacilityComponent : MonoBehaviour
         foreach (var f in facilities)
         {
             if (f == null || !Plugin.IsManaged(f.stuff_id)) continue;
+
+            // ⚠ 只给「日常产出型」建筑发产 —— 即 `FacilityGatherersHut` 那两座。
+            //   `Plugin.IsManaged` 是**归属判断**（窗口 UI / 工位数补丁也用它），
+            //   而实验建筑 105051 用的是 `FacilityFurnace` 机制（燃料 + 生产计划），
+            //   它也在 ManagedFacilityIds 里 —— 早先只按 IsManaged 筛，
+            //   结果**实验高炉也在每天产原木石料**（用户实测反馈）。
+            //   归属判断 ≠ 产出对象，必须再按设施类型过滤。
+            //
+            // ⚠⚠ 类型判断**不能用 C# 的 `is`**：IL2CPP interop 里所有设施都表现为基类
+            //   `Facility`，`f is FacilityGatherersHut` **永远为假** ——
+            //   早期这么写过，结果把自己两座建筑也全拦住了（综合生产所直接停产）。
+            //
+            // 判据顺序（宁可放行也别误停）：
+            //   ① 读游戏自己的 `class_name` 字段，等于 FacilityGatherersHut → 放行
+            //   ② 读不到 → 用 stuff_id 白名单（本 mod 的日常产出建筑）
+            if (!IsDailyProducer(f))
+            {
+                Plugin.LogV($"[Facility] guid={f.guid} 不是日常产出型设施，跳过发产");
+                continue;
+            }
             bool finished;
             try { finished = f.is_build_finished; }
             catch { finished = true; }

@@ -1,0 +1,47 @@
+修复：熔炉窗口 UI 被我隐藏 + 实验高炉误发产（两个都是我引入的回归）
+
+## 用户反馈
+「可以放置，窗口是熔炉那套。设置燃料类型按钮无法交互，UI 内容全是默认数值全都无法交互，
+  但是这个建筑跟超级生产所一样一直在生产木头石头」
+
+## 回归 1：熔炉窗口的控件被我隐藏了（导致整个 UI 失效）
+诊断输出直接给出证据：
+```
+[FacilityUI] 被隐藏的物体:
+  title_area/btn/btn_close                    ← 关闭按钮
+  title_area/btn/btn_ranking / btn_brush / btn_npc_locating
+  work_mode/dp_work_mode/Template             ← 工作模式下拉
+  content_area/txt_materials_range/num_adjust ← 材料取用范围的数字
+  content_area/my_progress_make               ← 进度
+  content_area/content_area/.../res_grid/icon_num*
+```
+**根因**：隐藏名单用的是**通用物体名**（`icon_num` / `my_progress_make` /
+`res_grid` / `num_adjust_of_materials_access_range`），而这些名字在**熔炉窗口里也存在** →
+把熔炉自己的 UI 全隐藏了，于是「全是默认值且无法交互」。
+
+**修法**：隐藏名单**按窗口类型分派**（`HideListFor(window)`）：
+- `WindowWorkshop`（制造台系）→ 只隐藏工坊配方专有的那些
+- 其他窗口（熔炉系）→ **什么都不隐藏** —— 它每一样控件都有用
+并明确记下规矩：**跨窗口重名的通用名绝不能进通用名单**；
+`my_progress_make`（进度）与「材料取用范围」是用户要求保留/实现的功能，任何名单都不该有。
+
+## 回归 2：实验高炉也在每天产原木石料
+**根因**：产出循环只按 `Plugin.IsManaged(f.stuff_id)` 筛，而我把 105051 也加进了
+`ManagedFacilityIds`（那是**归属判断**用的）→ 它被当成生产建筑发产。
+**归属判断 ≠ 产出对象**。
+
+**修法**：新增 `IsDailyProducer(f)`，判据顺序（宁可放行也别误停产出）：
+  ① 反射读游戏自己的 `class_name` 字段 → 命中 `FacilityGatherersHut` 放行
+  ② 读不到 → `stuff_id` 白名单（105040 / 105050）
+
+⚠ 中间踩了一个坑值得记录：我第一版用 C# 的 `f is FacilityGatherersHut` 判断，
+**IL2CPP 里永远为假**（所有设施都是 interop 的 `Facility` 包装）→
+把**自己两座建筑也全拦住了，综合生产所直接停产**。
+第二版用 `f.className` 编译不过（interop 里字段名是 `class_name`）→ 改用反射。
+
+## 实测（全绿）
+```
+场上: 105040 × 4 (workbench*) + 105050 × 1 (gatherers_hut27249342) + 105051 × 1 (trading_desk27327042)
+第 47090 日：5 座生产所完成产出（3 种产品）      ← 4+1，高炉被正确跳过
+```
+发产 guid 清单 = 22051487 / 22245617 / 22259151 / 27123272 / 27249342（正好 4+1，不含高炉）

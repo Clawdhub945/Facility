@@ -99,32 +99,11 @@ internal static class FacilityWindowUi
         // 隐藏制造台专有、对我们没意义的控件（配方/材料/自动制作/制作进度）
         // 名单来自 UnityExplorer 层级快照 + 反编译字段名
         // ⚠ 名单会随窗口预制体不同而变化；新增建筑时在这里加对应字段名即可。
-        // 名单分两类：
-        //   ① 窗口类的**直接字段**（精确反射命中）
-        //   ② **嵌套物体名**（不是字段，靠 HideAll 第②阶段在本窗口子树内按名找）
-        //      如 res_grid 里的「可使用的材料:」、my_progress_make 的「建造 100%」
-        // 游戏里拼写是 fomula（少个 r），不要顺手改正。
-        NativeUi.HideAll(window,
-            // ① 制造台的配方 / 材料 / 自动制作
-            // 注意：游戏拼写是 fomula（少个 r）
-            "formula_item_main", "formula_item_alternative", "fomula_item_alternative",
-            "auto_make_product_of_materials",
-            "material_settings", "material_settings_grid", "material_settings_panel",
-            "tmp_product",
-            // ② 制造台专有的「可使用的材料」「建造进度」「材料取用范围」
-            // ⚠⚠ **绝对不要隐藏 omula_item_main** —— 原生下拉 dp_blueprint
-            //    就是它的子物体！隐藏它 = 下拉整个消失（实测：诊断显示
-            //    dp_blueprint activeSelf=True inHierarchy=False，
-            //    链路里 omula_item_main activeSelf=False 就是元凶，
-            //    而数据侧一直是好的：显示值=秘银矿 +10/日、选项数=4）。
-            // ⚠ 不要隐藏容器 res_grid —— 原生下拉 dp_blueprint 就挂在它下面，
-            //    隐藏容器会把下拉一起干掉（实测：下拉被填充了却看不见）。
-            //    只隐藏「可使用的材料」里的那些格子。
-            "icon_num", "icon_num_1", "icon_num_2", "icon_num_3", "icon_num_4", "icon_num_5",
-            "my_progress_make",
-            "progress_fg", "txt_progress_title", "txt_progress_state",
-            "num_adjust_of_materials_access_range",
-            "btn_add_alternative");
+        // ⚠ 隐藏名单**按窗口类型分派** —— 一套通用名单会把熔炉窗口自己的控件也隐藏掉
+        //   （实测：熔炉的关闭/派工按钮、材料取用范围数字、进度、工作模式全消失）。
+        //   详见 HideListFor 的注释。
+        NativeUi.HideAll(window, HideListFor(window));
+
 
         RewriteTexts(window);
 
@@ -347,6 +326,60 @@ internal static class FacilityWindowUi
     ///   2. 窗口上 `facility_guid` 命中本 mod 建筑      → true
     ///   3. 都取不到                                    → **false（不动它）**
     /// </summary>
+    /// <summary>
+    /// 按**窗口类型**给出「要隐藏的控件」名单。
+    ///
+    /// ## 为什么必须区分窗口类型（血泪教训）
+    /// 早期版本用**一套通用名单**（`icon_num` / `my_progress_make` / `res_grid` …），
+    /// 结果用到熔炉窗口（`window_furnace`）时，把这些名字在熔炉里**同样存在**的控件也隐藏了 ——
+    /// 用户实测：熔炉的关闭按钮 / 派工按钮 / 材料取用范围数字 / 进度 / 工作模式下拉**全部消失**，
+    /// 整个 UI 变成「全是默认值且无法交互」。
+    ///
+    /// **规矩**：按物体名隐藏时，名单必须与窗口类型绑定；跨窗口重名的通用名
+    /// （`icon_num*` / `res_grid` / `my_progress_make` / `num_adjust*`）**绝不能**放进通用名单。
+    ///
+    /// 另外：「进度」与「材料取用范围」是用户**明确要求保留/实现**的功能，
+    /// 任何名单里都不该出现它们。
+    /// </summary>
+    private static string[] HideListFor(GameObject window)
+    {
+        // 制造台系（window_blacksmith / window_workshop）：只隐藏「工坊配方」专有的那些
+        if (HasComponentNamed(window, "WindowWorkshop"))
+        {
+            return new[]
+            {
+                "formula_item_main", "formula_item_alternative",
+                "fomula_item_main", "fomula_item_alternative",   // 游戏里拼写是 fomula
+                "auto_make_product_of_materials",
+                "material_settings", "material_settings_grid", "material_settings_panel",
+                "tmp_product",
+                "btn_add_alternative",
+                // 「可使用的材料」里的格子。**只隐藏格子，不隐藏容器 res_grid** ——
+                // 原生下拉 dp_blueprint 可能挂在容器下面（踩过：隐藏容器 → 下拉消失）。
+                "icon_num", "icon_num_1", "icon_num_2", "icon_num_3",
+                "icon_num_4", "icon_num_5",
+            };
+        }
+
+        // 熔炉系（window_furnace）：**什么都不隐藏** —— 每一样控件都有用
+        // （焚烧回收列表、燃料设置、材料取用范围、进度、工作模式）
+        return Array.Empty<string>();
+    }
+
+    /// <summary>窗口上有没有指定名字的组件（用来认窗口类型）</summary>
+    private static bool HasComponentNamed(GameObject window, string typeName)
+    {
+        try
+        {
+            foreach (var c in window.GetComponents<Component>())
+            {
+                if (c != null && c.GetType().Name == typeName) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     /// <summary>供安全护栏补丁复用（判断窗口是否属于本 mod 建筑）</summary>
     internal static bool IsOurWindowPublic(GameObject window) => IsOurWindow(window);
 
