@@ -152,6 +152,35 @@ internal static class UiProbe
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] UI 实验 ⑤ TMP 失败: {ex.Message}"); }
 
+        // ④ **决定性测试**：铺一张几乎全屏的洋红半透明遮罩。
+        //    如果连它都看不见 → 我们的 UI **根本没被渲染**（不是位置问题）；
+        //    如果看得见 → 说明渲染没问题，之前只是位置算错。
+        //    这一步是为了把"渲染问题"和"定位问题"彻底分开，不再瞎调坐标。
+        try
+        {
+            // ⚠ **实测结论**：任何 `anchorMin=0 / anchorMax=1` 的**拉伸**写法在这里都**无效** ——
+            //   窗口根的 `rect` 是 **550×0**，拉伸子物体会得到高度 0（游戏自己的子控件也是 550×0）。
+            //   所以红块用「中心锚点 + 明确 sizeDelta」，与 UI 模板**完全相同的定位参数**：
+            //   用户看到红块出现在哪，模板面板就会出现在哪 —— 这是可靠的位置标定手段。
+            var solid = new GameObject("marker_red");
+            solid.transform.SetParent(window.transform, false);
+            var srt = solid.AddComponent<RectTransform>();
+            srt.anchorMin = new Vector2(0.5f, 0.5f);
+            srt.anchorMax = new Vector2(0.5f, 0.5f);
+            srt.pivot = new Vector2(0.5f, 0.5f);
+            srt.sizeDelta = new Vector2(260f, 150f);              // 与模板面板同尺寸
+            srt.anchoredPosition = new Vector2(
+                Plugin.UiOffXEntry?.Value ?? 240f,
+                Plugin.UiOffYEntry?.Value ?? -170f);              // 与模板同偏移
+            try { srt.SetAsLastSibling(); } catch { }
+            var simg = solid.AddComponent<Image>();
+            simg.color = new Color(1f, 0f, 0f, 0.85f);            // 醒目的红，一眼能看到
+            simg.raycastTarget = false;
+            Plugin.LogV($"[Facility] UI 实验 ⑥ 标定红块已铺：offset=" +
+                        $"({srt.anchoredPosition.x:0},{srt.anchoredPosition.y:0}) size=260x150");
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] UI 实验 ⑥ 遮罩失败: {ex.Message}"); }
+
         return root;
     }
 }

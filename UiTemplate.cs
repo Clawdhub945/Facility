@@ -57,6 +57,29 @@ internal static class UiTemplate
     private static RectTransform? _content;
     private static ScrollRect? _scroll;
     private static GameObject? _ownerWindow;          // 模板挂在哪个窗口上
+
+    /// <summary>
+    /// 定位标定值（实测得出）：面板相对"锚点屏幕坐标"的偏移。
+    ///
+    /// 为什么需要标定：窗口根的 `rect` 是 550×0、其 UI `position` 约 (0,0)，
+    /// 而 Canvas 可视区是 `y = 0 .. -1000` —— 直接按锚点放会贴到屏幕最上沿（y≈-10），
+    /// 看起来就是"没显示"。这两个值就是把面板推进可视区所需的偏移。
+    /// 调整方法见 `docs/UI模板.md`。
+    /// </summary>
+    private static float _calibX = 240f;
+    private static float _calibY = -170f;
+
+    /// <summary>标定值改为读 cfg（热生效），方便在游戏里试位置而不用改代码重编译</summary>
+    private static void LoadCalibration()
+    {
+        try
+        {
+            if (Plugin.UiOffXEntry != null) _calibX = Plugin.UiOffXEntry.Value;
+            if (Plugin.UiOffYEntry != null) _calibY = Plugin.UiOffYEntry.Value;
+        }
+        catch { }
+    }
+
     private static string _lastSig = "";              // 上次渲染的状态签名
     private static float _contentHeight;
 
@@ -92,6 +115,9 @@ internal static class UiTemplate
                 _ownerWindow = window;
             }
 
+            // 跟随窗口移动（拖动窗口后面板要贴在窗口上）
+            UpdateFollow();
+
             // 状态签名：内容变了才刷新
             string sig = BuildSignature(spec, facility);
             if (sig == _lastSig) return;
@@ -108,24 +134,29 @@ internal static class UiTemplate
 
     private static bool Build(GameObject window, BuildingSpec spec)
     {
+        LoadCalibration();
         try
         {
-            // 只有第一次需要算尺寸；用窗口自身的 rect 作参考
-            float winW = 420f, winH = 300f;
-            try
-            {
-                var wrt = window.GetComponent<RectTransform>();
-                if (wrt != null && wrt.rect.width > 100f)
-                {
-                    winW = wrt.rect.width - 24f;
-                    // ⚠ 窗口 rect 可能是**布局前的初始值**（很小甚至 0），
-                    //   减出来后就成了负数 —— 踩过：日志里出现「面板 526×-96」。
-                    //   所以这里做下限保护，并取绝对值兜底。
-                    float h = Mathf.Abs(wrt.rect.height) - 80f;
-                    if (h >= 120f) winH = h;
-                }
-            }
-            catch { }
+            // ⚠⚠ 定位策略：**不能以窗口根为参照**
+            //   窗口根的 `rect` 是 550×0（容器，尺寸由子物体撑开），
+            //   而且它在屏幕上的位置可能是负的 —— 实测面板落在 `y=-1..-241`，
+            //   完全在可视区之外（屏幕上什么都看不到）。
+            //   所以改为找一个**真实可见的子控件**当锚点。
+            var anchor = FindAnchor(window);
+
+            // ⚠⚠⚠ 定位与尺寸的**根本约束**（实测结论，别再试别的写法）
+            //   这个窗口根的 `rect` 是 **550x0**！
+            //   所以任何 `anchorMin=0 / anchorMax=1` 的**拉伸**写法都会得到**高度 0**
+            //   → 渲染不出来（游戏自己的子控件也是 550x0，同因）。
+            //   实测证据：铺一张"全屏"洋红遮罩只出现一条 0 高度的残条；
+            //             而「中心锚点 + 明确 sizeDelta」的红块**正常显示**。
+            //
+            //   因此一律：**中心锚点 + 明确 sizeDelta + 相对中心的 anchoredPosition**。
+            //
+            // ⚠ 尺寸也用**固定值**，不从锚点推算 —— 实测锚点的 `rect` 也是 0，
+            //   推算出来的面板会变成 260×56 这种畸形尺寸。
+            //   260×150 是实测能完整放进「高炉」窗口（可视区约 340×230）的尺寸。
+            const float winW = 260f, winH = 150f;
 
             var root = new GameObject(RootName);
             root.transform.SetParent(window.transform, false);
@@ -133,9 +164,19 @@ internal static class UiTemplate
             rrt.anchorMin = new Vector2(0.5f, 0.5f);
             rrt.anchorMax = new Vector2(0.5f, 0.5f);
             rrt.pivot = new Vector2(0.5f, 0.5f);
-            rrt.anchoredPosition = new Vector2(0f, -18f);
             rrt.sizeDelta = new Vector2(winW, winH);
+            rrt.anchoredPosition = new Vector2(_calibX, _calibY);
             _root = root;
+            try
+            {
+                var w0 = window.GetComponent<RectTransform>();
+                _lastWindowPos = w0 != null ? new Vector2(w0.position.x, w0.position.y) : Vector2.zero;
+            }
+            catch { _lastWindowPos = Vector2.zero; }
+
+            // ⚠ **必须置顶**：新加的子物体默认排在最后（被别的 UI 盖住）。
+            try { rrt.SetAsLastSibling(); } catch { }
+            if (Plugin.VerboseEntry?.Value == true) DumpChildren(window);
 
             // 面板底
             var bg = new GameObject("panel");
@@ -181,6 +222,7 @@ internal static class UiTemplate
 
             Plugin.LogV($"[FacilityUI] UI 模板已构建：窗口 {window.name}，" +
                         $"面板 {winW:0}×{winH:0}（建筑「{spec.Name}」）");
+            DumpPlacement(window, rrt);
             return true;
         }
         catch (Exception ex)
@@ -190,6 +232,151 @@ internal static class UiTemplate
             return false;
         }
     }
+
+    /// <summary>
+    /// 诊断：打印模板的挂载位置 —— 父链、世界坐标、尺寸、是否在 Canvas 下、是否可见。
+    ///
+    /// 为什么需要：模板日志显示"已构建"，但屏幕上**看不到**。
+    /// 要么被别的 UI 盖住（层级/排序），要么挂在了一个不参与渲染的父节点上，
+    /// 要么坐标在窗口可视区之外。这三件事只能靠这份数据区分，不能猜。
+    /// </summary>
+    private static void DumpPlacement(GameObject window, RectTransform rt)
+    {
+        try
+        {
+            var sb = new StringBuilder("[FacilityUI] UI 模板挂载诊断:\n");
+            var cur = rt.transform;
+            int depth = 0;
+            while (cur != null && depth++ < 8)
+            {
+                var crt = cur.GetComponent<RectTransform>();
+                sb.Append("  ").Append(new string(' ', depth * 2)).Append(cur.name);
+                if (crt != null)
+                    sb.Append($" size={crt.rect.width:0}x{crt.rect.height:0}")
+                      .Append($" pos={crt.position.x:0},{crt.position.y:0}")
+                      .Append($" sibling={cur.GetSiblingIndex()}/{cur.parent?.childCount ?? 0}");
+                sb.Append(cur.gameObject.activeInHierarchy ? " [可见]" : " [不可见]").Append('\n');
+                if (cur.gameObject == window) break;
+                cur = cur.parent;
+            }
+            // 有没有 Canvas 祖先（没有就不会渲染）
+            bool hasCanvas = false;
+            try { hasCanvas = rt.GetComponentInParent<Canvas>() != null; } catch { }
+            sb.Append("  Canvas 祖先: ").Append(hasCanvas ? "有" : "【没有 → 不会渲染】").Append('\n');
+            // ⚠ 屏幕坐标最关键：窗口根 rect 常常是 550×0，光看它判断不出面板在不在可视区。
+            sb.Append($"  面板屏幕区: x={rt.position.x:0}..{rt.position.x + rt.rect.width:0}" +
+                      $" y={rt.position.y:0}..{rt.position.y - rt.rect.height:0}\n");
+            try
+            {
+                var canvas = rt.GetComponentInParent<Canvas>();
+                if (canvas != null)
+                {
+                    var crt = canvas.GetComponent<RectTransform>();
+                    if (crt != null)
+                        sb.Append($"  Canvas 屏幕区: x={crt.position.x:0}..{crt.position.x + crt.rect.width:0}" +
+                                  $" y={crt.position.y:0}..{crt.position.y - crt.rect.height:0}\n");
+                }
+            }
+            catch { }
+            sb.Append($"  面板缩放={rt.localScale.x:0.##}");
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 挂载诊断失败: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 诊断：列出窗口一级子控件的**屏幕区域**，用来挑一个"真实可见"的锚点。
+    ///
+    /// 为什么要这样：窗口根节点的 `rect` 是 550×0，且它的位置在屏幕上可能是负的
+    /// （面板曾落在 `y=-1..-241`，完全在可视区之外）。
+    /// 所以模板必须参照**某个可见子控件**来定位，而不是窗口根。
+    /// </summary>
+    private static void DumpChildren(GameObject window)
+    {
+        try
+        {
+            var sb = new StringBuilder("[FacilityUI] 窗口子控件屏幕区:\n");
+            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t.parent != window.transform) continue;
+                var rt = t.GetComponent<RectTransform>();
+                if (rt == null) continue;
+                sb.Append($"  {t.name}: x={rt.position.x:0}..{rt.position.x + rt.rect.width:0}" +
+                          $" y={rt.position.y:0}..{rt.position.y - rt.rect.height:0}" +
+                          $" size={rt.rect.width:0}x{rt.rect.height:0}\n");
+            }
+            Plugin.LogV(sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 子控件诊断失败: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 找一个"真实可见的锚点控件"：优先 `content_area`（窗口内容区），
+    /// 否则用面积最大的可见子控件。返回 null 表示没找到。
+    /// </summary>
+    private static RectTransform? FindAnchor(GameObject window)
+    {
+        try
+        {
+            RectTransform? best = null;
+            float bestArea = 0f;
+            foreach (var t in window.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t.parent != window.transform) continue;
+                var rt = t.GetComponent<RectTransform>();
+                if (rt == null || !t.gameObject.activeInHierarchy) continue;
+                float w = Mathf.Abs(rt.rect.width), h = Mathf.Abs(rt.rect.height);
+                if (w < 40f || h < 40f) continue;
+                if (t.name == "content_area") return rt;         // 首选
+                float area = w * h;
+                if (area > bestArea) { bestArea = area; best = rt; }
+            }
+            return best;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 把矩形摆到指定的**绝对屏幕坐标**（左上角对齐）。
+    /// 用 `RectTransform.position` 直接写 —— 在"父节点尺寸为 0"的情况下，
+    /// `anchoredPosition` 那套算不出正确结果（试过两种，都会落到 y&lt;0 的可视区之外）。
+    /// </summary>
+    private static void SetScreenPos(RectTransform rt, Vector2 topLeftScreen)
+    {
+        try
+        {
+            rt.position = new Vector3(topLeftScreen.x, topLeftScreen.y, rt.position.z);
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 设置面板位置失败: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 让面板跟随窗口移动：记录"面板相对窗口"的偏移，每帧把它贴回去。
+    /// UI 模板必须跟着窗口走，否则拖动窗口后面板会留在原地。
+    /// </summary>
+    private static void UpdateFollow()
+    {
+        try
+        {
+            if (_root == null || _ownerWindow == null) return;
+            var rrt = _root.GetComponent<RectTransform>();
+            var wrt = _ownerWindow.GetComponent<RectTransform>();
+            if (rrt == null || wrt == null) return;
+
+            // 窗口移动了 → 面板按同样位移跟随
+            Vector2 winNow = new Vector2(wrt.position.x, wrt.position.y);
+            if (winNow != _lastWindowPos)
+            {
+                Vector2 delta = winNow - _lastWindowPos;
+                _lastWindowPos = winNow;
+                rrt.position = new Vector3(rrt.position.x + delta.x,
+                                           rrt.position.y + delta.y, rrt.position.z);
+            }
+        }
+        catch { }
+    }
+
+    private static Vector2 _lastWindowPos = new Vector2(float.NaN, float.NaN);
 
     // ==================================================================
     // 刷新内容

@@ -91,6 +91,13 @@ public class Plugin : BasePlugin
     internal static BepInEx.Configuration.ConfigEntry<bool>? VerboseEntry;
     /// <summary>超级生产所自定义贴图的整体缩放（cfg「外观.超级生产所贴图缩放」）</summary>
     internal static BepInEx.Configuration.ConfigEntry<float>? SpriteScaleEntry;
+
+    /// <summary>
+    /// UI 模板的定位标定（像素）。窗口坐标系刁钻，用 cfg 便于**不改代码就能试位置**。
+    /// 见 docs/UI模板.md 的标定流程。
+    /// </summary>
+    internal static BepInEx.Configuration.ConfigEntry<float>? UiOffXEntry;
+    internal static BepInEx.Configuration.ConfigEntry<float>? UiOffYEntry;
     private HarmonyLib.Harmony? _harmony;
 
     public override void Load()
@@ -133,6 +140,13 @@ public class Plugin : BasePlugin
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
 
             // 自定义外观缩放：改完**最多 1.5 秒热生效**（不用重启游戏）
+            UiOffXEntry = Config.Bind("UI模板", "横偏移", 240f,
+                new BepInEx.Configuration.ConfigDescription(
+                    "通用 UI 模板面板相对窗口锚点的水平偏移（像素）。改完热生效。"));
+            UiOffYEntry = Config.Bind("UI模板", "纵偏移", -170f,
+                new BepInEx.Configuration.ConfigDescription(
+                    "通用 UI 模板面板相对窗口锚点的纵向偏移（像素，负值向下）。改完热生效。"));
+
             SpriteScaleEntry = Config.Bind("外观", "超级生产所贴图缩放", 1.3f,
                 new BepInEx.Configuration.ConfigDescription(
                     "超级生产所自定义贴图的整体缩放。1.0 = 按 64 像素/格 1:1 渲染。" +
