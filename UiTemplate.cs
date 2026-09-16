@@ -73,8 +73,11 @@ internal static class UiTemplate
     //   Canvas: scaleFactor=0.9，UI 坐标 × 0.9 = 屏幕像素
     //   nchor(0,0) 对应屏幕左下角 → 想让面板落在窗口中心附近，
     //   UI 坐标约为 (339, -838)（= 屏幕 (305,754) ÷ 0.9，y 取负）
-    private static float _calibX = 339f;
-    private static float _calibY = -838f;
+    // ⚠ 基准 (0,0)：实测红块在 anchoredPosition=(0,0) 时可见（屏幕左下角附近）。
+    //   从 0 起调最直观：cfg 里填正数 = 右/下，负数 = 左/上（屏幕坐标）。
+    //   标定流程见 docs/UI模板.md。
+    private static float _calibX = 0f;
+    private static float _calibY = 0f;
 
     /// <summary>标定值改为读 cfg（热生效），方便在游戏里试位置而不用改代码重编译</summary>
     private static void LoadCalibration()

@@ -69,15 +69,17 @@ internal static class UiProbe
 
         try
         {
-            var root = Build(window);
+            // ⚠ 只建**标定红块**了 —— 之前的"实验文本面板"用途已完成
+            //   （证明能创建 uGUI），留着只会跟正式模板挤在一起、互相干扰。
+            var root = BuildMarker(window);
             if (root == null)
             {
-                Plugin.LogV("[Facility] UI 实验：构建失败（详情见上方日志）");
+                Plugin.LogV("[Facility] 标定块：构建失败（详情见上方日志）");
                 return false;
             }
             _probe = root;
-            Plugin.LogV("[Facility] UI 实验：自建 UI 已挂到窗口 " + window.name +
-                        "（若游戏稳定，说明运行时构建 uGUI 可行）");
+            Plugin.LogV("[Facility] 标定块已挂到窗口 " + window.name +
+                        "（与 UI 模板面板同参数：看到它在哪，面板就在哪）");
             return true;
         }
         catch (Exception ex)
@@ -94,93 +96,45 @@ internal static class UiProbe
     }
 
     /// <summary>
-    /// 构建一个最小可用的小组件：半透明底板 + 一行文字。
-    /// 逐步记日志，方便定位"哪一步在 IL2CPP 下不成立"。
+    /// 只建**标定红块**：与 UI 模板面板**完全相同的定位参数**
+    /// （同锚点 `(0.5,0.5)`、同 `sizeDelta`、同 cfg 偏移）。
+    ///
+    /// 用户看到红块出现在哪，模板面板就会出现在哪 —— 这是可靠的位置标定手段。
+    ///
+    /// ⚠ 之前那个"实验文本面板"已完成使命（证明运行时能创建 uGUI），
+    ///   留着只会跟正式模板互相干扰，所以删掉了。
     /// </summary>
-    private static GameObject? Build(GameObject window)
+    private static GameObject? BuildMarker(GameObject window)
     {
-        // ① 根物体（挂到窗口下，继承它的 Canvas / 层级）
         var root = new GameObject(ProbeRootName);
-        Plugin.LogV("[Facility] UI 实验 ① 新建 GameObject 成功");
         root.transform.SetParent(window.transform, false);
-        Plugin.LogV("[Facility] UI 实验 ② SetParent 成功");
-
         var rt = root.AddComponent<RectTransform>();
-        if (rt == null) { Plugin.LogV("[Facility] UI 实验 ③ RectTransform 取不到"); return null; }
-        rt.anchorMin = new Vector2(0f, 1f);
-        rt.anchorMax = new Vector2(0f, 1f);
-        rt.pivot = new Vector2(0f, 1f);
-        rt.anchoredPosition = new Vector2(12f, -44f);
-        rt.sizeDelta = new Vector2(300f, 96f);
-        Plugin.LogV("[Facility] UI 实验 ③ RectTransform 配置成功");
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(260f, 150f);
+        rt.anchoredPosition = new Vector2(
+            Plugin.UiOffXEntry?.Value ?? 0f,
+            Plugin.UiOffYEntry?.Value ?? 0f);
+        try { rt.SetAsLastSibling(); } catch { }
 
-        // ② 底板（Image）
+        // ⚠ 与模板一样**必须挂独立 Canvas**：游戏 UI 是自绘批渲染，
+        //   不加 `overrideSorting` 的话 uGUI 会被它盖住（实测：看不见）。
         try
         {
-            var bg = new GameObject("bg");
-            bg.transform.SetParent(root.transform, false);
-            bg.AddComponent<RectTransform>();
-            var img = bg.AddComponent<Image>();
-            img.color = new Color(0.15f, 0.14f, 0.13f, 0.92f);
-            img.raycastTarget = false;
-            var bgRt = bg.GetComponent<RectTransform>();
-            bgRt.anchorMin = Vector2.zero;
-            bgRt.anchorMax = Vector2.one;
-            bgRt.offsetMin = Vector2.zero;
-            bgRt.offsetMax = Vector2.zero;
-            Plugin.LogV("[Facility] UI 实验 ④ Image 底板成功");
+            var cv = root.AddComponent<Canvas>();
+            cv.overrideSorting = true;
+            cv.sortingOrder = 30001;          // 比模板再高 1，标定时一定看得见
+            root.AddComponent<UnityEngine.UI.GraphicRaycaster>();
         }
-        catch (Exception ex) { Plugin.LogV($"[Facility] UI 实验 ④ Image 失败: {ex.Message}"); }
+        catch (Exception cex) { Plugin.LogV($"[Facility] 标定块挂 Canvas 失败: {cex.Message}"); }
 
-        // ③ 文本（TMP）
-        try
-        {
-            var go = new GameObject("txt");
-            go.transform.SetParent(root.transform, false);
-            var trt = go.AddComponent<RectTransform>();
-            trt.anchorMin = Vector2.zero;
-            trt.anchorMax = Vector2.one;
-            trt.offsetMin = new Vector2(8f, 6f);
-            trt.offsetMax = new Vector2(-8f, -6f);
-            var tmp = go.AddComponent<TextMeshProUGUI>();
-            tmp.text = "UI 实验：\n运行时构建 uGUI\n成功✓";
-            tmp.fontSize = 14;
-            tmp.alignment = TextAlignmentOptions.TopLeft;
-            tmp.color = new Color(0.95f, 0.9f, 0.78f, 1f);
-            tmp.raycastTarget = false;
-            Plugin.LogV("[Facility] UI 实验 ⑤ TextMeshProUGUI 成功");
-        }
-        catch (Exception ex) { Plugin.LogV($"[Facility] UI 实验 ⑤ TMP 失败: {ex.Message}"); }
+        var img = root.AddComponent<Image>();
+        img.color = new Color(1f, 0f, 0f, 0.85f);
+        img.raycastTarget = false;
 
-        // ④ **决定性测试**：铺一张几乎全屏的洋红半透明遮罩。
-        //    如果连它都看不见 → 我们的 UI **根本没被渲染**（不是位置问题）；
-        //    如果看得见 → 说明渲染没问题，之前只是位置算错。
-        //    这一步是为了把"渲染问题"和"定位问题"彻底分开，不再瞎调坐标。
-        try
-        {
-            // ⚠ **实测结论**：任何 `anchorMin=0 / anchorMax=1` 的**拉伸**写法在这里都**无效** ——
-            //   窗口根的 `rect` 是 **550×0**，拉伸子物体会得到高度 0（游戏自己的子控件也是 550×0）。
-            //   所以红块用「中心锚点 + 明确 sizeDelta」，与 UI 模板**完全相同的定位参数**：
-            //   用户看到红块出现在哪，模板面板就会出现在哪 —— 这是可靠的位置标定手段。
-            var solid = new GameObject("marker_red");
-            solid.transform.SetParent(window.transform, false);
-            var srt = solid.AddComponent<RectTransform>();
-            srt.anchorMin = new Vector2(0.5f, 0.5f);
-            srt.anchorMax = new Vector2(0.5f, 0.5f);
-            srt.pivot = new Vector2(0.5f, 0.5f);
-            srt.sizeDelta = new Vector2(260f, 150f);              // 与模板面板同尺寸
-            srt.anchoredPosition = new Vector2(
-                Plugin.UiOffXEntry?.Value ?? 339f,
-                Plugin.UiOffYEntry?.Value ?? -838f);              // 与模板同偏移
-            try { srt.SetAsLastSibling(); } catch { }
-            var simg = solid.AddComponent<Image>();
-            simg.color = new Color(1f, 0f, 0f, 0.85f);            // 醒目的红，一眼能看到
-            simg.raycastTarget = false;
-            Plugin.LogV($"[Facility] UI 实验 ⑥ 标定红块已铺：offset=" +
-                        $"({srt.anchoredPosition.x:0},{srt.anchoredPosition.y:0}) size=260x150");
-        }
-        catch (Exception ex) { Plugin.LogV($"[Facility] UI 实验 ⑥ 遮罩失败: {ex.Message}"); }
-
+        Plugin.LogV($"[Facility] 标定红块已铺：offset=" +
+                    $"({rt.anchoredPosition.x:0},{rt.anchoredPosition.y:0}) size=260x150");
         return root;
     }
 }

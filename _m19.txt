@@ -1,0 +1,48 @@
+UI 模板定位【解决】：必须挂独立 Canvas（游戏 UI 是自绘的，会盖住 uGUI）
+
+## 用户实测反馈（关键）
+「出现了 关了很多组件后才显示的，是被挡住了」
+→ **红块和我们的面板确实能渲染**，之前**被游戏自绘 UI 挡住**。
+用户给的层级图也证实 `facility_ui_template` 就挂在窗口下：
+```
+[5] window_gatherers_hut
+  ├ title_area / content_area / product_record / tips_root
+  ├ [2] facility_ui_probe      ← 实验/标定块
+  ├ marker_red
+  └ [2] facility_ui_template   ← 模板面板
+```
+
+## 解决：面板加独立 Canvas + overrideSorting
+```csharp
+var cv = root.AddComponent<Canvas>();
+cv.overrideSorting = true;
+cv.sortingOrder = 30000;          // 远高于游戏 UI
+root.AddComponent<GraphicRaycaster>();
+```
+**根因**：游戏 UI 是**自绘批渲染**（`batch_sprite_renderer_*`）画的，
+我们的面板是标准 uGUI —— 两套渲染体系；只改同级顺序（`SetAsLastSibling`）
+**压不住**游戏自绘 UI。这是本轮最关键的发现。
+
+## 另一条硬约束（已写进文档）
+**不能用拉伸写法**：窗口根的 `rect` 是 **550×0**，`anchorMin=0/anchorMax=1` 的
+拉伸子物体会得到**高度 0**；游戏自己的子控件也全是 550×0
+→ **不存在"窗口可视矩形"可当参照**（这就是前面几轮定位全部失败的原因）。
+唯一可行：**中心锚点 + 明确 sizeDelta**。
+
+## 顺带修的报错
+`WindowGatherersHut.ShowWindowTip` 空引用 → 加进安全护栏。
+
+## 定位标定（可交互，热生效）
+* cfg `[UI模板] 横偏移 / 纵偏移`，改完 ~1.5 秒生效，**不用重编译**
+* `UiProbe` 画的**红块与模板面板同参数**（同锚点/同尺寸/同偏移/同独立 Canvas）
+  → **看到红块在哪，面板就在哪**，据此一次标定
+* 坐标换算已测得：`UI × 0.9 = 屏幕像素`；`anchor(0,0)+(0,0)` = 屏幕左下角
+
+## 清理
+`UiProbe` 删掉了早期的"实验文本面板"（使命已完成，留着与正式模板互相干扰），
+现在只保留标定红块。
+
+## 文档
+`docs/UI模板.md` 新增两节：
+* §五「运行时 uGUI 的两个**必须**条件」（独立 Canvas / 不能用拉伸）
+* §六 坐标换算公式（供精确定位）

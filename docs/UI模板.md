@@ -99,7 +99,51 @@ Ui = new UiLayout {
 
 ---
 
-## 四、踩过的坑
+## 五、[重要] 运行时 uGUI 的两个必须条件
+
+这两条是反复失败后测出来的，缺一个就看不到面板：
+
+### 1. 必须挂独立 Canvas + overrideSorting
+ar cv = root.AddComponent<Canvas>(); cv.overrideSorting = true; cv.sortingOrder = 30000;
+外加 GraphicRaycaster。
+
+**原因**：游戏的 UI 是**自绘批渲染**（atch_sprite_renderer_*）画的，
+我们的面板是标准 uGUI —— **两套渲染体系**。
+只改同级顺序（SetAsLastSibling）**压不住**游戏自绘 UI。
+实测：面板物体确实挂在窗口下（UnityExplorer 能看到 acility_ui_template），
+但屏幕上被游戏 UI 完全盖住；加独立 Canvas 后才显示。
+
+### 2. 不能用拉伸写法，必须给明确尺寸
+* 无效：nchorMin=0 / anchorMax=1 → 窗口根 
+ect 是 **550×0**，拉伸子物体高度为 0
+* 可行：**中心锚点 + 明确 sizeDelta**（nchorMin=anchorMax=(0.5,0.5)，sizeDelta=(260,150)）
+
+**原因**：窗口根 
+ect 是 550×0（它只是容器，实际尺寸由自绘系统决定），
+游戏自己的子控件也全是 550×0 —— **不存在窗口可视矩形**可当参照，
+这就是用锚点推算位置全部失败的根本原因。
+
+### 3. 定位用 cfg 标定（热生效）
+`ini
+[UI模板]
+横偏移 = 0     # 正数 = 向右
+纵偏移 = 0     # 正数 = 向下
+`
+UiProbe 画的**红块与面板同参数** —— 看到红块在哪，面板就在哪。
+
+---
+
+## 六、坐标换算（已测得）
+`
+Canvas: ui_canvas  ScreenSpaceCamera  scaleFactor=0.9   rect=1600x1000
+  → UI 坐标 × 0.9 = 屏幕像素
+  → anchor(0,0)+(0,0) = 屏幕左下角
+换算：aPos ≈ (X / 0.9, -(Screen.height - Y) / 0.9)
+`
+
+---
+
+## 七、踩过的坑
 
 | 坑 | 现象 | 解法 |
 |---|---|---|
@@ -111,7 +155,7 @@ Ui = new UiLayout {
 
 ---
 
-## 五、给新建筑配 UI 的步骤
+## 八、给新建筑配 UI 的步骤
 
 ```csharp
 // BuildingSpec.cs 里那条规格加一个 Ui
