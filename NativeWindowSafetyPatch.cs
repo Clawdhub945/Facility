@@ -41,28 +41,35 @@ internal static class NativeWindowSafetyPatch
     /// 实测我们的 105052 在该索引里**有 7 条**）。
     /// 护栏的副作用是"窗口少了功能"，比崩溃更难发现。
     ///
-    /// 所以现在改成**按条件跳过**：只有窗口的 `workshop` 字段确实为 null 时才跳过
-    /// （那种情况调下去必抛空引用，会让整个 SetInfo 中断）。
+    /// ## 两种跳过策略
+    /// * **按条件**（`Conditional`）：只在窗口确实缺 `workshop` 对象时跳过。
+    ///   适用于 `WindowWorkshop` 系（有 `workshop` 字段，为 null 时必崩）。
+    /// * **无条件**（默认）：只要是**本 mod 的窗口**就跳过。
+    ///   适用于「本来就没有 `workshop` 字段、调用必崩」的方法 ——
+    ///   例如 `WindowGatherersHut.ShowWindowTip`：
+    ///   它**没有 `workshop` 字段**，所以"按条件"判据永远返回"不算缺" → 照旧执行 → 仍崩。
+    ///   （踩过：加了护栏但报错依旧，就是这个原因。）
     /// </summary>
-    private static readonly (string Type, string Method)[] Guarded =
+    private static readonly (string Type, string Method, bool Conditional)[] Guarded =
     {
-        ("WindowWorkshop", "ShowWindowTip"),
-        ("WindowWorkFacility", "ShowWindowTip"),
-        // ⚠ 实测报错：WindowGatherersHut.ShowWindowTip 抛空引用
-        //   （我们的建筑借 window_gatherers_hut 时，它要的字段没绑上）
-        ("WindowGatherersHut", "ShowWindowTip"),
-        ("WindowWorkFacilityWithStockAdjust", "ShowWindowTip"),
-        ("WindowWorkshop", "InitDpBlueprint"),
-        ("WindowWorkshop", "UpdateAlternativeFormula"),
-        ("WindowWorkshop", "Refresh"),
-        ("WindowWorkshop", "UpdateAutoMakeProductOfMaterials"),
+        // —— 无条件跳过（本 mod 窗口一律不调）——
+        ("WindowGatherersHut", "ShowWindowTip", false),
+        ("WindowWorkFacility", "ShowWindowTip", false),
+        ("WindowWorkFacilityWithStockAdjust", "ShowWindowTip", false),
+        ("WindowWorkshop", "ShowWindowTip", false),
+
+        // —— 按条件跳过（缺 workshop 才跳；否则放行，让游戏自己填配方下拉）——
+        ("WindowWorkshop", "InitDpBlueprint", true),
+        ("WindowWorkshop", "UpdateAlternativeFormula", true),
+        ("WindowWorkshop", "Refresh", true),
+        ("WindowWorkshop", "UpdateAutoMakeProductOfMaterials", true),
     };
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
     static IEnumerable<MethodBase> TargetMethods()
     {
         var list = new List<MethodBase>();
-        foreach (var (typeName, methodName) in Guarded)
+        foreach (var (typeName, methodName, _) in Guarded)
         {
             Type? t = null;
             try { t = AccessTools.TypeByName(typeName); } catch { }
@@ -103,15 +110,16 @@ internal static class NativeWindowSafetyPatch
     /// <summary>
     /// 只在本 mod 的窗口**且确实会崩**时跳过原方法；其余一律放行。
     ///
-    /// ⚠ 这里的判据从「是我们的窗口就跳过」收窄成「是我们的窗口**且缺必要对象**才跳过」——
-    /// 因为无脑跳过会让窗口**悄悄少掉功能**（实测：跳过 `InitDpBlueprint` →
-    /// 熔炉的配方下拉永远是空的，而数据其实都在）。
-    ///
-    /// 崩溃的根因是 `this.workshop == null`（我们的建筑借窗口预制体时，
-    /// 设施组件类型可能和窗口期望的不一致）→ 那种情况必须跳过，否则整个 SetInfo 中断。
+    /// ## 两种跳过策略（见 <see cref="Guarded"/> 的注释）
+    /// * **无条件**：本 mod 的窗口一律跳过 —— 用于「本来就没有 `workshop` 字段、
+    ///   调用必崩」的方法（`*ShowWindowTip`）。
+    ///   ⚠ 踩过：`WindowGatherersHut.ShowWindowTip` 加过护栏但报错依旧 ——
+    ///   因为它**没有 `workshop` 字段**，"按条件"判据永远返回"不算缺" → 照旧执行 → 仍崩。
+    /// * **按条件**：只在窗口确实缺 `workshop` 对象时跳过 —— 用于 `WindowWorkshop` 系
+    ///   （无脑跳过会让熔炉的配方下拉永远是空的）。
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("ReSharper", "UnusedMember.Global")]
-    static bool Prefix(object __instance)
+    static bool Prefix(object __instance, MethodBase __originalMethod)
     {
         try
         {
@@ -119,20 +127,18 @@ internal static class NativeWindowSafetyPatch
             bool ours = FacilityWindowUi.IsOurWindowPublic(c.gameObject);
             if (!ours) return true;                     // 原版窗口：完全放行
 
-            // 是我们的窗口：只在「窗口上没有 workshop 对象」时跳过（否则必抛空引用）
-            if (NeedsWorkshopButMissing(c))
-            {
-                Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{_currentMethod}（窗口缺 workshop 对象）");
-                return false;
-            }
-            return true;
+            string name = __originalMethod?.Name ?? "?";
+            bool conditional = !name.EndsWith("ShowWindowTip");   // ShowWindowTip 系无条件跳过
+
+            if (!conditional && !NeedsWorkshopButMissing(c)) return true;
+
+            Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{name}" +
+                        (conditional ? "（窗口缺 workshop 对象）" : "（该方法在本 mod 建筑上必崩）"));
+            return false;
         }
         catch { }
         return true;
     }
-
-    /// <summary>当前正在护栏的方法名（TargetMethods 时记录，仅用于日志）</summary>
-    private static string _currentMethod = "?";
 
     /// <summary>
     /// 窗口上需要 `workshop` 字段但它是 null 吗。
