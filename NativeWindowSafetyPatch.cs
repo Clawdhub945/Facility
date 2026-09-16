@@ -41,19 +41,26 @@ internal static class NativeWindowSafetyPatch
     /// 实测我们的 105052 在该索引里**有 7 条**）。
     /// 护栏的副作用是"窗口少了功能"，比崩溃更难发现。
     ///
-    /// ## 两种跳过策略
-    /// * **按条件**（`Conditional`）：只在窗口确实缺 `workshop` 对象时跳过。
-    ///   适用于 `WindowWorkshop` 系（有 `workshop` 字段，为 null 时必崩）。
-    /// * **无条件**（默认）：只要是**本 mod 的窗口**就跳过。
-    ///   适用于「本来就没有 `workshop` 字段、调用必崩」的方法 ——
-    ///   例如 `WindowGatherersHut.ShowWindowTip`：
-    ///   它**没有 `workshop` 字段**，所以"按条件"判据永远返回"不算缺" → 照旧执行 → 仍崩。
-    ///   （踩过：加了护栏但报错依旧，就是这个原因。）
+    /// ## 判据用「窗口预制体名」，不用运行时字段状态
+    /// 踩过两次：
+    ///   ① 用「是不是我们的窗口」（归属判断）→ 它偶尔判 false，护栏形同虚设
+    ///   ② 用「运行时字段在不在」→ `ShowWindowTip` 被调的时机**早于字段绑定**，
+    ///      判据返回放行、方法内部随即抛空引用
+    /// 窗口名来自 `build.json` 的 `window_prefab`，**静态且稳定**，是唯一可靠判据。
+    ///
+    /// ## 为什么要「整类」护栏
+    /// `WindowGatherersHut` 有 4 个方法（`SetInfo` / `UpdateState` /
+    /// `ShowWindowTip` / `GetResQuality`），它们**都依赖 `this.gatherers_hut` 字段**
+    /// —— 而我们的建筑借这个窗口预制体时那个字段是空的。
+    /// 逐个方法加护栏会"修一个冒一个"（`ShowWindowTip` 刚修完 `UpdateState` 又崩），
+    /// 所以按类一起护栏。
     /// </summary>
     private static readonly (string Type, string Method, bool Conditional)[] Guarded =
     {
         // —— 无条件跳过（本 mod 窗口一律不调）——
         ("WindowGatherersHut", "ShowWindowTip", false),
+        ("WindowGatherersHut", "UpdateState", false),
+        ("WindowGatherersHut", "GetResQuality", false),
         ("WindowWorkFacility", "ShowWindowTip", false),
         ("WindowWorkFacilityWithStockAdjust", "ShowWindowTip", false),
         ("WindowWorkshop", "ShowWindowTip", false),
@@ -126,30 +133,32 @@ internal static class NativeWindowSafetyPatch
             if (__instance is not Component c || c == null) return true;
 
             string name = __originalMethod?.Name ?? "?";
+            string winName = "";
+            try { winName = c.gameObject.name ?? ""; } catch { }
+            bool isOurWindow = IsOurWindowName(winName);
 
-            // ① `ShowWindowTip` 系：判据用「**窗口预制体名**是否属于本 mod 建筑的窗口」。
+            // ① 「无条件跳过」类：只要窗口属于本 mod 建筑就跳。
             //
-            // 反编译实证（`WindowGatherersHut.ShowWindowTip`）：
-            //   gatherers_hut = this->fields.gatherers_hut;
-            //   if (!gatherers_hut) sub_1803AB740();        // ← 空引用崩在这
-            // 即窗口必须绑着 `FacilityGatherersHut`。
+            // 判据用**窗口预制体名**（来自 build.json 的 `window_prefab`），
+            // ⚠ 不用「运行时字段在不在」——踩过两次：
+            //   ① 用归属判断 → 它偶尔判 false，护栏形同虚设；
+            //   ② 用字段状态 → 这些方法被调的时机**早于字段绑定**，
+            //      判据返回放行、方法内部随即抛空引用。
             //
-            // ⚠ 为什么不用「字段在不在」当判据：实测该方法被调用的**时机早于字段绑定**
-            //   （探针显示判据当时返回了"放行"，紧接着方法内部就抛了空引用）。
-            //   窗口名来自 build.json 的 `window_prefab`，稳定、不依赖时序。
-            if (name.EndsWith("ShowWindowTip"))
+            // 为什么整类护栏：`WindowGatherersHut` 的 4 个方法都依赖 `gatherers_hut` 字段
+            // （我们借该窗口时它是空的），逐个加会"修一个冒一个"
+            // （`ShowWindowTip` 刚修完 `UpdateState` 又崩）。
+            if (UnconditionalMethods.Contains(name))
             {
-                string winName = "";
-                try { winName = c.gameObject.name ?? ""; } catch { }
-                if (!IsOurWindowName(winName)) return true;          // 原版窗口：放行
-
+                if (!isOurWindow) return true;                       // 原版窗口：放行
                 Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{name}" +
                             $"（窗口 {winName} 属于本 mod 建筑；该方法依赖未绑定的设施对象）");
                 return false;
             }
 
-            // ② 其余方法：只对本 mod 窗口生效，且仅当缺 `workshop` 时跳过
-            //    （无脑跳过会让熔炉的配方下拉永远是空的 —— 踩过）
+            // ② 其余方法（`WindowWorkshop` 系）：只对本 mod 窗口生效，
+            //    且仅当缺 `workshop` 时跳过 ——
+            //    无脑跳过会让**熔炉的配方下拉永远是空的**（踩过）。
             if (!FacilityWindowUi.IsOurWindowPublic(c.gameObject)) return true;
             if (NeedsWorkshopButMissing(c))
             {
@@ -161,6 +170,14 @@ internal static class NativeWindowSafetyPatch
         catch { }
         return true;
     }
+
+    /// <summary>无条件跳过的方法名（窗口属于本 mod 建筑就跳）</summary>
+    private static readonly System.Collections.Generic.HashSet<string> UnconditionalMethods = new()
+    {
+        "ShowWindowTip",     // 依赖 gatherers_hut / workshop / furnace 等设施对象
+        "UpdateState",       // 同上（WindowGatherersHut.UpdateState 实测也崩）
+        "GetResQuality",     // 同上
+    };
 
     /// <summary>
     /// 这个窗口名是不是本 mod 建筑用的窗口预制体

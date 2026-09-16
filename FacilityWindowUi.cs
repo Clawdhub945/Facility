@@ -123,10 +123,11 @@ internal static class FacilityWindowUi
             DumpBoundFacility(window);
             DumpFurnaceRecipeDropdown(window);
             DumpAllDropdowns(window);
-
-            // 运行时构建 uGUI 的能力验证（详细模式下自动跑一次）
-            UiProbe.AutoOnce(window);
         }
+
+        // ⚠ 标定红块要**每次**检查（不在上面的去重块里）——
+        //   窗口关掉时红块会跟着销毁，只建一次的话再开窗就没了。
+        UiProbe.AutoEnsure(window);
 
         // 不是本 mod 的建筑 → 一律不碰（fail-safe）
         if (spec == null) return;

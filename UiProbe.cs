@@ -32,21 +32,30 @@ internal static class UiProbe
     private static GameObject? _probe;
 
     /// <summary>
-    /// **自动模式**：详细模式开启时，第一次处理某个窗口就自动建一次实验 UI。
+    /// **自动模式**：处理某个窗口时，确保标定红块存在。
+    ///
+    /// ⚠ 不能"只建一次"：窗口关闭时红块**跟着窗口一起被销毁**，
+    /// 之后再开窗就没红块了（踩过：用户反复报"红块没显示"，就是这个原因）。
+    /// 所以每次处理窗口都检查一次：物体还在就跳过，不在就重建。
     ///
     /// 为什么不用热键：实测 `keybd_event` 发 F12 游戏收不到
-    /// （F10/F8 都正常，F12 可能被系统或别的程序截了）——
-    /// 与其在热键上纠缠，不如让它在"开窗"这个必然发生的时机自动跑一次。
+    /// （F10/F8 都正常，F12 可能被系统或别的程序截了）。
     /// </summary>
-    internal static void AutoOnce(GameObject? window)
+    internal static void AutoEnsure(GameObject? window)
     {
-        if (window == null || _autoDone) return;
+        if (window == null) return;
         if (Plugin.VerboseEntry?.Value != true) return;
-        _autoDone = true;
+
+        // 红块还挂在这个窗口下 → 什么都不用做
+        try
+        {
+            if (_probe != null && _probe && _probe.transform.parent == window.transform) return;
+        }
+        catch { }
+
+        Destroy();          // 旧的可能已失效/挂在别的窗口上
         Toggle(window);
     }
-
-    private static bool _autoDone;
 
     /// <summary>
     /// 在当前打开的窗口里构建/销毁实验 UI（F12 切换）。
