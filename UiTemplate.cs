@@ -206,6 +206,10 @@ internal static class UiTemplate
             try { rrt.SetAsLastSibling(); } catch { }
 
             // 面板底
+            // ⚠⚠ 用**显式尺寸**而不是拉伸：窗口根的 rect 高度是 0，
+            //    nchorMin=0/anchorMax=1 的拉伸会让子物体高度变成 0（实测踩过：
+            //    标定红块日志出现「尺寸 260×0」——物体在、位置对，但 0 像素高看不见）。
+            //    父物体给了明确 sizeDelta，子物体才能安全地用拉伸填满它。
             var bg = new GameObject("panel");
             bg.transform.SetParent(root.transform, false);
             var brt = bg.AddComponent<RectTransform>();

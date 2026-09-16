@@ -46,10 +46,32 @@ internal static class UiProbe
         if (window == null) return;
         if (Plugin.VerboseEntry?.Value != true) return;
 
-        // 红块还挂在这个窗口下 → 什么都不用做
+        // 红块还挂在这个窗口下 → **只同步位置**（cfg 可能刚改过，要热生效）
         try
         {
-            if (_probe != null && _probe && _probe.transform.parent == window.transform) return;
+            if (_probe != null && _probe && _probe.transform.parent == window.transform)
+            {
+                var rt = _probe.GetComponent<RectTransform>();
+                // ⚠ 保险：高度为 0 说明是"修复前建的旧物体"（窗口根 rect 高度 0 导致）
+                //   → 销毁重建，否则会一直看不到（实测踩过：日志显示尺寸 260×0）
+                if (rt != null && (rt.rect.height < 1f || rt.rect.width < 1f))
+                {
+                    Destroy();
+                    Toggle(window);
+                    return;
+                }
+                if (rt != null)
+                {
+                    var want = new Vector2(Plugin.UiOffXEntry?.Value ?? 0f,
+                                           Plugin.UiOffYEntry?.Value ?? 0f);
+                    if (rt.anchoredPosition != want)
+                    {
+                        rt.anchoredPosition = want;
+                        LogMarkerPos(rt, "位置已热更新");
+                    }
+                }
+                return;
+            }
         }
         catch { }
 
@@ -121,6 +143,11 @@ internal static class UiProbe
         rt.anchorMin = new Vector2(0.5f, 0.5f);
         rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
+        // ⚠⚠ **尺寸必须显式给**，不能用任何"拉伸/锚点推算" ——
+        //   窗口根的 `rect` 高度是 **0**，所以：
+        //     * `anchorMin=0/anchorMax=1` 的拉伸 → 高度 0
+        //     * 拿父 rect 算 sizeDelta          → 也是 0
+        //   实测日志：`标定红块...尺寸 260×0` —— 物体在、位置对，但**0 像素高看不见**。
         rt.sizeDelta = new Vector2(260f, 150f);
         rt.anchoredPosition = new Vector2(
             Plugin.UiOffXEntry?.Value ?? 0f,
@@ -138,12 +165,37 @@ internal static class UiProbe
         }
         catch (Exception cex) { Plugin.LogV($"[Facility] 标定块挂 Canvas 失败: {cex.Message}"); }
 
+        // 图片直接挂在 root 上（不再建子物体 —— 子物体若用拉伸会继承"高度 0"的毛病）
         var img = root.AddComponent<Image>();
         img.color = new Color(1f, 0f, 0f, 0.85f);
         img.raycastTarget = false;
 
-        Plugin.LogV($"[Facility] 标定红块已铺：offset=" +
-                    $"({rt.anchoredPosition.x:0},{rt.anchoredPosition.y:0}) size=260x150");
+        LogMarkerPos(rt, "已铺");
         return root;
+    }
+
+    /// <summary>
+    /// 打印红块的 **anchoredPosition ↔ 屏幕像素** 对应关系。
+    ///
+    /// 为什么要这个：这个窗口的坐标系有额外的缩放层 ——
+    /// 实测 `anchoredPosition` 从 0 改到 ±400，屏幕位置几乎没动
+    /// （`(0,0)→屏幕(0,900)`、`(400,-400)→屏幕(4,904)`）。
+    /// 有了这组对应关系才能反算出目标偏移，而不是盲试。
+    /// </summary>
+    private static void LogMarkerPos(RectTransform rt, string tag)
+    {
+        try
+        {
+            var canvas = rt.GetComponentInParent<Canvas>();
+            float k = (canvas != null && canvas.scaleFactor > 0.001f) ? canvas.scaleFactor : 1f;
+            float sx = rt.position.x * k;
+            float sy = Screen.height - rt.position.y * k;
+            Vector2 p = rt.anchoredPosition;
+            Plugin.LogV($"[Facility] 标定红块{tag}：anchoredPosition=({p.x:0},{p.y:0})" +
+                        $" → 屏幕像素≈({sx:0},{sy:0})（中心点；尺寸 " +
+                        $"{rt.rect.width:0}×{rt.rect.height:0}，Canvas 换算 {k:0.###}）；" +
+                        $"屏幕 {Screen.width}×{Screen.height}");
+        }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 标定块坐标打印失败: {ex.Message}"); }
     }
 }
