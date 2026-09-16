@@ -48,6 +48,9 @@ internal static class NativeWindowSafetyPatch
     {
         ("WindowWorkshop", "ShowWindowTip"),
         ("WindowWorkFacility", "ShowWindowTip"),
+        // ⚠ 实测报错：WindowGatherersHut.ShowWindowTip 抛空引用
+        //   （我们的建筑借 window_gatherers_hut 时，它要的字段没绑上）
+        ("WindowGatherersHut", "ShowWindowTip"),
         ("WindowWorkFacilityWithStockAdjust", "ShowWindowTip"),
         ("WindowWorkshop", "InitDpBlueprint"),
         ("WindowWorkshop", "UpdateAlternativeFormula"),

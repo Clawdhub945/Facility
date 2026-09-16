@@ -181,7 +181,25 @@ internal static class UiTemplate
             }
             catch { _lastWindowPos = Vector2.zero; }
 
-            // ⚠ **必须置顶**：新加的子物体默认排在最后（被别的 UI 盖住）。
+            // ⚠⚠ **必须单独挂一个高层级 Canvas** —— 这是 uGUI 唯一可靠的置顶方式。
+            //
+            // 为什么需要：游戏的 UI 是**自绘批渲染**（`batch_sprite_renderer_*`）画的，
+            // 而我们的面板是标准 uGUI。两者在不同渲染体系里，
+            // 只改同级顺序（`SetAsLastSibling`）**压不住**游戏自绘的 UI
+            // —— 实测：面板确实存在于窗口下（UnityExplorer 能看到 `facility_ui_template`），
+            //    但屏幕上被游戏 UI 盖住，完全看不见。
+            // 子 Canvas + `overrideSorting` + 高 `sortingOrder` 才能让 uGUI 画在自绘 UI 之上。
+            try
+            {
+                var cv = root.AddComponent<Canvas>();
+                cv.overrideSorting = true;
+                cv.sortingOrder = 30000;          // 远高于游戏 UI 的层级
+                root.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+                Plugin.LogV("[FacilityUI] UI 模板已挂独立 Canvas（overrideSorting, order=30000）");
+            }
+            catch (Exception cex) { Plugin.LogV($"[FacilityUI] 挂 Canvas 失败: {cex.Message}"); }
+
+            // 同级顺序也调到最后（辅助）
             try { rrt.SetAsLastSibling(); } catch { }
 
             // 面板底
