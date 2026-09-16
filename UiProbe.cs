@@ -49,25 +49,19 @@ internal static class UiProbe
         // 红块还挂在这个窗口下 → **只同步位置**（cfg 可能刚改过，要热生效）
         try
         {
-            if (_probe != null && _probe && _probe.transform.parent == window.transform)
+            if (_probe != null && _probe && _probe.transform.parent == window.transform.parent)
             {
-                var rt = _probe.GetComponent<RectTransform>();
-                // ⚠ 保险：高度为 0 说明是"修复前建的旧物体"（窗口根 rect 高度 0 导致）
-                //   → 销毁重建，否则会一直看不到（实测踩过：日志显示尺寸 260×0）
-                if (rt != null && (rt.rect.height < 1f || rt.rect.width < 1f))
+                // 自绘路线：位置 = UI 根位置 + cfg 偏移（世界单位，1 单位 = 100 像素）
+                var marker = _probe.transform.Find("marker_sprite");
+                if (marker != null)
                 {
-                    Destroy();
-                    Toggle(window);
-                    return;
-                }
-                if (rt != null)
-                {
-                    var want = new Vector2(Plugin.UiOffXEntry?.Value ?? 0f,
-                                           Plugin.UiOffYEntry?.Value ?? 0f);
-                    if (rt.anchoredPosition != want)
+                    float offX = Plugin.UiOffXEntry?.Value ?? 0f;
+                    float offY = Plugin.UiOffYEntry?.Value ?? 0f;
+                    var want = _probe.transform.position + new Vector3(offX * 0.01f, offY * 0.01f, 0f);
+                    if (marker.position != want)
                     {
-                        rt.anchoredPosition = want;
-                        LogMarkerPos(rt, "位置已热更新");
+                        marker.position = want;
+                        LogMarkerScreenPos(marker, want);
                     }
                 }
                 return;
@@ -135,67 +129,70 @@ internal static class UiProbe
     /// ⚠ 之前那个"实验文本面板"已完成使命（证明运行时能创建 uGUI），
     ///   留着只会跟正式模板互相干扰，所以删掉了。
     /// </summary>
+    /// <summary>
+    /// 标定/验证块：**用自绘内核**（`SpriteRenderer` + `MySpriteRenderer`）建一个红块。
+    ///
+    /// ## 为什么不再用 uGUI
+    /// 实测结论：游戏窗口根的 `rect` 是 **550×0**，uGUI 布局**从不运行**
+    /// → 标准 uGUI 在这类窗口里没有可用的布局信息（`rect` 永远是 0），怎么调都看不见。
+    /// 所以改用游戏自己的渲染方式：`GameObject` + `SpriteRenderer` + `MySpriteRenderer`，
+    /// **位置用世界坐标**（`Transform.position`），完全不依赖 uGUI 布局。
+    ///
+    /// 见 `SpriteUi.cs` 与 `docs/UI模板.md` §五 的完整结论。
+    /// </summary>
     private static GameObject? BuildMarker(GameObject window)
     {
-        var root = new GameObject(ProbeRootName);
-        root.transform.SetParent(window.transform, false);
-        var rt = root.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0.5f);
-        rt.anchorMax = new Vector2(0.5f, 0.5f);
-        rt.pivot = new Vector2(0.5f, 0.5f);
-        // ⚠⚠ **尺寸必须显式给**，不能用任何"拉伸/锚点推算" ——
-        //   窗口根的 `rect` 高度是 **0**，所以：
-        //     * `anchorMin=0/anchorMax=1` 的拉伸 → 高度 0
-        //     * 拿父 rect 算 sizeDelta          → 也是 0
-        //   实测日志：`标定红块...尺寸 260×0` —— 物体在、位置对，但**0 像素高看不见**。
-        rt.sizeDelta = new Vector2(260f, 150f);
-        rt.anchoredPosition = new Vector2(
-            Plugin.UiOffXEntry?.Value ?? 0f,
-            Plugin.UiOffYEntry?.Value ?? 0f);
-        try { rt.SetAsLastSibling(); } catch { }
-
-        // ⚠ 与模板一样**必须挂独立 Canvas**：游戏 UI 是自绘批渲染，
-        //   不加 `overrideSorting` 的话 uGUI 会被它盖住（实测：看不见）。
         try
         {
-            var cv = root.AddComponent<Canvas>();
-            cv.overrideSorting = true;
-            cv.sortingOrder = 30001;          // 比模板再高 1，标定时一定看得见
-            root.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+            // ① UI 根：挂在窗口父级下，位置与窗口根一致（世界坐标）
+            var root = SpriteUi.EnsureRoot(window);
+            if (root == null) { Plugin.LogV("[Facility] 自绘标定块：UI 根建不出来"); return null; }
+
+            // ② 放红块的位置：窗口位置 + cfg 偏移（单位是**世界单位**，不是像素）
+            float offX = Plugin.UiOffXEntry?.Value ?? 0f;
+            float offY = Plugin.UiOffYEntry?.Value ?? 0f;
+            Vector3 pos = root.transform.position + new Vector3(offX * 0.01f, offY * 0.01f, 0f);
+
+            // ③ 建红块（取不到图会自动退化为 1×1 白图 + 红色 → 依然可见）
+            var sr = SpriteUi.AddImage(root, "marker_sprite", "facility_marker",
+                                       pos, scale: 260f, sortingOrder: 30000);
+            if (sr == null) { Plugin.LogV("[Facility] 自绘标定块：创建失败"); return null; }
+            sr.color = new Color(1f, 0f, 0f, 0.85f);      // 醒目红
+
+            // ④ 顺便建一行文字，验证 TMP(3D) 能不能画出来
+            SpriteUi.AddText(root, "marker_text", "自绘 UI 测试 ✓",
+                             pos + new Vector3(0f, -0.04f, 0f), size: 1f);
+
+            LogMarkerScreenPos(sr.transform, pos);
+            return root;
         }
-        catch (Exception cex) { Plugin.LogV($"[Facility] 标定块挂 Canvas 失败: {cex.Message}"); }
-
-        // 图片直接挂在 root 上（不再建子物体 —— 子物体若用拉伸会继承"高度 0"的毛病）
-        var img = root.AddComponent<Image>();
-        img.color = new Color(1f, 0f, 0f, 0.85f);
-        img.raycastTarget = false;
-
-        LogMarkerPos(rt, "已铺");
-        return root;
+        catch (Exception ex)
+        {
+            Plugin.LogError($"[Facility] 自绘标定块异常: {ex}");
+            return null;
+        }
     }
 
     /// <summary>
-    /// 打印红块的 **anchoredPosition ↔ 屏幕像素** 对应关系。
-    ///
-    /// 为什么要这个：这个窗口的坐标系有额外的缩放层 ——
-    /// 实测 `anchoredPosition` 从 0 改到 ±400，屏幕位置几乎没动
-    /// （`(0,0)→屏幕(0,900)`、`(400,-400)→屏幕(4,904)`）。
-    /// 有了这组对应关系才能反算出目标偏移，而不是盲试。
+    /// 打印红块的**世界坐标 → 屏幕像素**换算结果。
+    /// 有了这个就能直接算出"要放到屏幕哪个位置，该给什么世界坐标"，
+    /// 不用再靠反复试偏移。
     /// </summary>
-    private static void LogMarkerPos(RectTransform rt, string tag)
+    private static void LogMarkerScreenPos(Transform tf, Vector3 worldPos)
     {
         try
         {
-            var canvas = rt.GetComponentInParent<Canvas>();
-            float k = (canvas != null && canvas.scaleFactor > 0.001f) ? canvas.scaleFactor : 1f;
-            float sx = rt.position.x * k;
-            float sy = Screen.height - rt.position.y * k;
-            Vector2 p = rt.anchoredPosition;
-            Plugin.LogV($"[Facility] 标定红块{tag}：anchoredPosition=({p.x:0},{p.y:0})" +
-                        $" → 屏幕像素≈({sx:0},{sy:0})（中心点；尺寸 " +
-                        $"{rt.rect.width:0}×{rt.rect.height:0}，Canvas 换算 {k:0.###}）；" +
-                        $"屏幕 {Screen.width}×{Screen.height}");
+            var cam = Camera.main;
+            string screen = "（取不到主相机）";
+            if (cam != null)
+            {
+                var sp = cam.WorldToScreenPoint(worldPos);
+                screen = $"屏幕像素≈({sp.x:0},{sp.y:0})";
+            }
+            Plugin.LogV($"[Facility] 自绘标定块：世界坐标=({worldPos.x:0.###},{worldPos.y:0.###})" +
+                        $" {screen}；屏幕 {Screen.width}×{Screen.height}" +
+                        $"；缩放={tf.localScale.x:0}（1 单位=1 世界单位）");
         }
-        catch (Exception ex) { Plugin.LogV($"[Facility] 标定块坐标打印失败: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogV($"[Facility] 打印标定坐标失败: {ex.Message}"); }
     }
 }

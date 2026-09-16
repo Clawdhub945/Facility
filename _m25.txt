@@ -1,0 +1,50 @@
+【路线 A 落地】自绘 UI 内核 SpriteUi：用 SpriteRenderer + MySpriteRenderer（绕开 uGUI 布局）
+
+## 用户的决定
+「我要自由度高的，我有的是时间，测试可以叫我，你负责写代码」
+→ 走路 A：用游戏自己的渲染系统，不用标准 uGUI。
+
+## 为什么必须放弃 uGUI（最终结论）
+UnityExplorer 实测：
+```
+facility_ui_template
+  sizeDelta = 260, 150      ← 设置生效
+  rect      = ...260, 0     ← 实际高度 0
+  offsetMin.y == offsetMax.y
+```
+点 `Inspect` 重开后数值恢复原值、点 `Apply` 无反应
+→ **`rect` 是布局系统写入的缓存，而这个窗口的 uGUI 布局从不运行**
+（游戏 UI 是自绘批渲染画的）→ 标准 uGUI 在这类窗口里**没有可用的布局信息**。
+
+## 反编译依据（游戏自己怎么做）
+`Facility.InitBodySp`：
+```c
+SpriteRenderer *sr = Find("body/sp").GetComponent<SpriteRenderer>();
+MySpriteRenderer *sp = MySpriteRenderer.Create(sr);       // 包装已有 SpriteRenderer
+if (sr.sprite != null)
+    sp.sprite_id = SpriteManager.Ins.TryGetSpriteId(sr.sprite.name);
+```
+`MySpriteRenderer.FillSprite()` 里 `sr.sprite = SpriteManager.Get(_sprite_name)`
+→ **它兼容标准 SpriteRenderer**：SpriteRenderer 负责"画什么"，
+MySpriteRenderer 参与批渲染。位置用 `Transform`/世界坐标，**完全不依赖 uGUI 布局**。
+
+## 新增 `SpriteUi.cs`（自绘 UI 内核）
+* `EnsureRoot(anchor)` —— 建 UI 根，挂到锚点**父级**下、位置与锚点一致（世界坐标）
+  （挂父级是为了避开窗口根可能的缩放/旋转）
+* `AddImage(parent, name, spriteName, worldPos, scale, sortingOrder)` ——
+  建 `GameObject` + `SpriteRenderer` + `MySpriteRenderer`；
+  精灵取不到时**退化为 1×1 白图 + 红色**（保证可见，便于调试布局）
+* `AddText(...)` —— 用 **TextMeshPro（3D 版）** 而不是 `TextMeshProUGUI`
+  —— 后者依赖 Canvas/RectTransform，而我们的窗口恰恰没有可用的 uGUI 布局
+* `AttachMySpriteRenderer` —— 优先走工厂方法 `Create(SpriteRenderer, string, int, Vector3)`，
+  失败退回 `AddComponent(Il2CppType.From(t))`
+
+## `UiProbe` 已改用自绘内核
+标定块 = 自绘红块 + 一行 `TextMeshPro` 文字，并打印
+**世界坐标 → 屏幕像素**（`Camera.main.WorldToScreenPoint`），
+这样"要放到屏幕哪里就给什么世界坐标"可直接算出，不用再试偏移。
+
+## 状态
+* 编译通过、已部署
+* 本次自动测试因 **F10 开窗偶发失效**（`Apply` 一次都没跑）未能验证
+  → 需用户手动开一次高炉窗口确认红块是否出现
