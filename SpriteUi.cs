@@ -46,6 +46,91 @@ internal static class SpriteUi
     /// <summary>当前 UI 根（供诊断）</summary>
     internal static GameObject? Root => _root;
 
+    /// <summary>
+    /// **屏幕像素 → 世界坐标** 的精确换算。
+    ///
+    /// ## 为什么需要它
+    /// 实测（UnityExplorer）：
+    /// ```
+    /// marker_sprite   LocalPosition=339,-4599.6   Position(世界)=7.98,-46.0
+    /// 父级 ui_canvas  localScale=0.01，rect=1600x1000
+    /// ```
+    /// 而屏幕只覆盖 `y ∈ [0, -10]`（1000 UI × 0.01）——
+    /// 所以世界坐标 `y=-46` 的面板在**屏幕外约 4 倍屏幕高度**的地方（实测踩过：
+    /// 用户报告"没看到"，UnityExplorer 里却能看到物体存在且 ActiveSelf）。
+    ///
+    /// 换算依据：`ui_canvas` 的 `rect`（1600×1000 UI）对应整块屏幕，
+    /// 乘上父级缩放（0.01）就是世界尺寸（16×10）。
+    /// </summary>
+    internal static class Coords
+    {
+        /// <summary>画布的世界尺寸（宽 × 高）。取不到时用 16×10 兜底。</summary>
+        internal static Vector2 CanvasWorldSize(GameObject uiRoot)
+        {
+            try
+            {
+                var canvas = uiRoot.GetComponentInParent<Canvas>();
+                if (canvas != null)
+                {
+                    var crt = canvas.GetComponent<RectTransform>();
+                    if (crt != null && crt.rect.width > 1f && crt.rect.height > 1f)
+                    {
+                        var s = canvas.transform.localScale;
+                        float k = Mathf.Abs(s.x) > 1e-6f ? s.x : 1f;
+                        return new Vector2(crt.rect.width * k, crt.rect.height * k);
+                    }
+                }
+            }
+            catch { }
+            return new Vector2(16f, 10f);
+        }
+
+        /// <summary>画布左上角的世界坐标</summary>
+        internal static Vector3 CanvasOrigin(GameObject uiRoot)
+        {
+            try
+            {
+                var canvas = uiRoot.GetComponentInParent<Canvas>();
+                if (canvas != null)
+                {
+                    var crt = canvas.GetComponent<RectTransform>();
+                    if (crt != null)
+                    {
+                        var size = CanvasWorldSize(uiRoot);
+                        // pivot 通常为 0.5,0.5 → 左上角 = 中心 + (−w/2, +h/2)
+                        return new Vector3(crt.position.x - size.x * (1f - crt.pivot.x),
+                                           crt.position.y + size.y * (1f - crt.pivot.y), 0f);
+                    }
+                }
+            }
+            catch { }
+            return Vector3.zero;
+        }
+
+        /// <summary>
+        /// 屏幕像素点 → 世界坐标。
+        /// `screenY` 用**左上角为原点**的像素坐标（符合直觉：0 = 屏幕顶）。
+        /// </summary>
+        internal static Vector3 ScreenToWorld(GameObject uiRoot, float screenX, float screenY)
+        {
+            var size = CanvasWorldSize(uiRoot);
+            Vector3 origin = CanvasOrigin(uiRoot);
+            float wx = origin.x + (screenX / Mathf.Max(1f, Screen.width)) * size.x;
+            float wy = origin.y - (screenY / Mathf.Max(1f, Screen.height)) * size.y;
+            return new Vector3(wx, wy, 0f);
+        }
+
+        /// <summary>世界坐标 → 屏幕像素（诊断用，与 <see cref="ScreenToWorld"/> 互逆）</summary>
+        internal static Vector2 WorldToScreen(GameObject uiRoot, Vector3 world)
+        {
+            var size = CanvasWorldSize(uiRoot);
+            Vector3 origin = CanvasOrigin(uiRoot);
+            float sx = (world.x - origin.x) / Mathf.Max(1e-6f, size.x) * Screen.width;
+            float sy = (origin.y - world.y) / Mathf.Max(1e-6f, size.y) * Screen.height;
+            return new Vector2(sx, sy);
+        }
+    }
+
     /// <summary>销毁（换窗口/关窗）</summary>
     internal static void Destroy()
     {
@@ -199,6 +284,61 @@ internal static class SpriteUi
         }
         catch (Exception ex) { Plugin.LogError($"[FacilityUI] 造占位白图失败: {ex.Message}"); }
         return _white!;
+    }
+
+    /// <summary>
+    /// 建一个**纯色矩形块**，尺寸按**像素**指定（高自由度布局的基础元件）。
+    ///
+    /// ## 为什么要专门做这个
+    /// 直接用 1×1 白图 + 大缩放会变成一个巨大的纯色方块（实测踩过：
+    /// 缩放 260 的白图糊满屏幕）。这里用 `pixelsPerUnit = 1` 建精灵，
+    /// 于是 **1 世界单位 = 1 像素**，缩放直接传像素数即可 —— 尺寸可预期、可计算。
+    ///
+    /// ⚠ 注意世界单位与画布的换算：`ui_canvas.localScale = 0.01`，
+    /// 所以"1 世界单位 = 0.01 画布单位 = ? 屏幕像素"要按画布算。
+    /// 这里的 `widthPx/heightPx` 是**世界单位**意义上的尺寸；
+    /// 用 <see cref="Coords"/> 做屏幕换算时保持一致即可。
+    /// </summary>
+    internal static SpriteRenderer? AddRect(GameObject parent, string name, Color color,
+                                            Vector3 worldPos, float widthPx, float heightPx,
+                                            int sortingOrder = 30000)
+    {
+        try
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent.transform, false);
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = UnitSprite();                   // 1×1、ppu=1 → 1 单位 = 1 像素
+            sr.color = color;
+            try { sr.sortingOrder = sortingOrder; } catch { }
+            go.transform.position = worldPos;
+            go.transform.localScale = new Vector3(widthPx, heightPx, 1f);
+            AttachMySpriteRenderer(go, sr, "", sortingOrder);
+            return sr;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogError($"[FacilityUI] 建色块失败({name}): {ex}");
+            return null;
+        }
+    }
+
+    private static Sprite? _unit;
+    /// <summary>1×1、`pixelsPerUnit = 1` 的精灵 → 缩放即像素数</summary>
+    private static Sprite UnitSprite()
+    {
+        if (_unit != null) return _unit;
+        try
+        {
+            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            tex.SetPixel(0, 0, Color.white);
+            tex.Apply();
+            tex.hideFlags = HideFlags.HideAndDontSave;
+            _unit = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
+            _unit.hideFlags = HideFlags.HideAndDontSave;
+        }
+        catch (Exception ex) { Plugin.LogError($"[FacilityUI] 造单位精灵失败: {ex.Message}"); }
+        return _unit!;
     }
 
     /// <summary>

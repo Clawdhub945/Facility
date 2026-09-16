@@ -57,7 +57,9 @@ internal static class UiProbe
                 {
                     float offX = Plugin.UiOffXEntry?.Value ?? 0f;
                     float offY = Plugin.UiOffYEntry?.Value ?? 0f;
-                    var want = _probe.transform.position + new Vector3(offX * 0.01f, offY * 0.01f, 0f);
+                    float sx = Screen.width * 0.5f + offX;
+                    float sy = Screen.height * 0.5f + offY;
+                    var want = SpriteUi.Coords.ScreenToWorld(_probe, sx, sy);
                     if (marker.position != want)
                     {
                         marker.position = want;
@@ -144,24 +146,23 @@ internal static class UiProbe
     {
         try
         {
-            // ① UI 根：挂在窗口父级下，位置与窗口根一致（世界坐标）
             var root = SpriteUi.EnsureRoot(window);
             if (root == null) { Plugin.LogV("[Facility] 自绘标定块：UI 根建不出来"); return null; }
 
-            // ② 放红块的位置：窗口位置 + cfg 偏移（单位是**世界单位**，不是像素）
-            float offX = Plugin.UiOffXEntry?.Value ?? 0f;
-            float offY = Plugin.UiOffYEntry?.Value ?? 0f;
-            Vector3 pos = root.transform.position + new Vector3(offX * 0.01f, offY * 0.01f, 0f);
+            // ① 位置：用**屏幕像素**指定（左上角为原点），由 Coords 换算成世界坐标。
+            //    目标 = 屏幕中央（实测：直接给世界坐标会跑到屏幕外 4 倍高度处）。
+            float sx = Screen.width * 0.5f + (Plugin.UiOffXEntry?.Value ?? 0f);
+            float sy = Screen.height * 0.5f + (Plugin.UiOffYEntry?.Value ?? 0f);
+            Vector3 pos = SpriteUi.Coords.ScreenToWorld(root, sx, sy);
 
-            // ③ 建红块（取不到图会自动退化为 1×1 白图 + 红色 → 依然可见）
-            var sr = SpriteUi.AddImage(root, "marker_sprite", "facility_marker",
-                                       pos, scale: 260f, sortingOrder: 30000);
+            // ② 尺寸：按**像素**给（AddRect 用 ppu=1 的精灵 → 缩放即尺寸）
+            var sr = SpriteUi.AddRect(root, "marker_sprite", new Color(1f, 0f, 0f, 0.85f),
+                                      pos, 260f, 150f, sortingOrder: 30000);
             if (sr == null) { Plugin.LogV("[Facility] 自绘标定块：创建失败"); return null; }
-            sr.color = new Color(1f, 0f, 0f, 0.85f);      // 醒目红
 
-            // ④ 顺便建一行文字，验证 TMP(3D) 能不能画出来
-            SpriteUi.AddText(root, "marker_text", "自绘 UI 测试 ✓",
-                             pos + new Vector3(0f, -0.04f, 0f), size: 1f);
+            // ③ 一行文字（TextMeshPro 3D 版，不依赖 uGUI 布局）
+            SpriteUi.AddText(root, "marker_text", "自绘 UI 测试 OK",
+                             pos + new Vector3(0f, -120f, 0f), size: 40f);
 
             LogMarkerScreenPos(sr.transform, pos);
             return root;
@@ -173,25 +174,22 @@ internal static class UiProbe
         }
     }
 
-    /// <summary>
-    /// 打印红块的**世界坐标 → 屏幕像素**换算结果。
-    /// 有了这个就能直接算出"要放到屏幕哪个位置，该给什么世界坐标"，
-    /// 不用再靠反复试偏移。
-    /// </summary>
+    /// <summary>打印世界坐标 ↔ 屏幕像素（用 SpriteUi.Coords 互算，验证换算正确）</summary>
     private static void LogMarkerScreenPos(Transform tf, Vector3 worldPos)
     {
         try
         {
-            var cam = Camera.main;
-            string screen = "（取不到主相机）";
-            if (cam != null)
+            var uiRoot = SpriteUi.Root;
+            string back = "?";
+            if (uiRoot != null)
             {
-                var sp = cam.WorldToScreenPoint(worldPos);
-                screen = $"屏幕像素≈({sp.x:0},{sp.y:0})";
+                var sp = SpriteUi.Coords.WorldToScreen(uiRoot, worldPos);
+                back = $"({sp.x:0},{sp.y:0})";
             }
+            var size = uiRoot != null ? SpriteUi.Coords.CanvasWorldSize(uiRoot) : Vector2.zero;
             Plugin.LogV($"[Facility] 自绘标定块：世界坐标=({worldPos.x:0.###},{worldPos.y:0.###})" +
-                        $" {screen}；屏幕 {Screen.width}×{Screen.height}" +
-                        $"；缩放={tf.localScale.x:0}（1 单位=1 世界单位）");
+                        $" → 回算屏幕像素={back}；画布世界尺寸={size.x:0.##}×{size.y:0.##}" +
+                        $"；屏幕={Screen.width}×{Screen.height}；缩放={tf.localScale.x:0}×{tf.localScale.y:0}");
         }
         catch (Exception ex) { Plugin.LogV($"[Facility] 打印标定坐标失败: {ex.Message}"); }
     }
