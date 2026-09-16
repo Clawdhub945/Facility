@@ -1,0 +1,46 @@
+UI 模板定位突破：坐标换算测得，标准 uGUI **能渲染**
+
+## 用户关键观察
+「这个是不是出来了」—— 截图里窗口下方能看到我们创建的文本：
+```
+UI 实验:
+运行时构建 uGUI
+成功✓
+```
+→ **证明标准 uGUI 完全能渲染**，之前不是"看不到"，而是"位置在屏幕左下角、跑到窗口外面"。
+
+## 坐标变换精确测量（`DumpCoordSys`）
+```
+Canvas: ui_canvas scaleFactor=0.9 renderMode=ScreenSpaceCamera
+  canvas rect=1600x1000 localScale=0.01
+  → 换算：UI 坐标 × 0.9 = 屏幕像素
+
+--- 从窗口根到 Canvas 的链 ---
+  window_gatherers_hut pos=0,0 rect=550x0  anchor=0.5-0.5
+      window_root      pos=0,0 rect=1600x1000 anchor=0-1
+          ui           pos=0,0 rect=1600x1000
+            ui_canvas  pos=0,0 rect=1600x1000 localScale=0.01
+
+--- 一级子控件的屏幕像素 ---
+  title_area / content_area / product_record / tips_root → UIpos=(-3,0) size=550x0
+  facility_ui_template                                   → UIpos=(0,0)  size=260x150
+```
+
+## 结论
+1. **游戏自己的 UI 元素 `size` 全是 `550×0`** —— 说明它们**不是标准 uGUI 布局**渲染的，
+   而是游客**自绘批渲染系统**（`batch_sprite_renderer_*`）。
+   所以**不存在"窗口可视矩形"可以拿来当参照** —— 这是前面所有定位尝试失败的根因。
+2. **标准 uGUI 的坐标系**：`anchor(0,0)` + `anchoredPosition(0,0)` = **屏幕左下角**，
+   换算系数 0.9（UI × 0.9 = 屏幕像素）。
+   → 想让面板出现在屏幕 (X, Y)，`anchoredPosition` ≈ `(X / 0.9, -(Screen.height - Y) / 0.9)`
+3. 由此算出：屏幕窗口中心 (305,754) → UI 坐标约 **(339, -838)**，已写入 cfg 默认值。
+
+## 交付物
+* `DumpCoordSys()` —— 精确测量 Canvas 缩放/坐标链/子控件屏幕位置（**以后定位问题先用它**）
+* cfg `[UI模板] 横偏移 / 纵偏移` —— **热生效**，可在游戏里直接试位置，不用重编译
+* `marker_red` 标定块 —— 与模板面板**同参数**，看到红块在哪就知道面板在哪
+
+## 下一步
+按算出的 (339,-838) 验证；用户可用 cfg 微调。
+若游戏自绘系统与 uGUI 层级冲突（uGUI 可能被自绘 UI 盖住），
+则需评估"用游戏自绘系统画面板"的方案（路 1）。

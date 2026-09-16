@@ -140,10 +140,10 @@ public class Plugin : BasePlugin
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
 
             // 自定义外观缩放：改完**最多 1.5 秒热生效**（不用重启游戏）
-            UiOffXEntry = Config.Bind("UI模板", "横偏移", 240f,
+            UiOffXEntry = Config.Bind("UI模板", "横偏移", 0f,
                 new BepInEx.Configuration.ConfigDescription(
                     "通用 UI 模板面板相对窗口锚点的水平偏移（像素）。改完热生效。"));
-            UiOffYEntry = Config.Bind("UI模板", "纵偏移", -170f,
+            UiOffYEntry = Config.Bind("UI模板", "纵偏移", 0f,
                 new BepInEx.Configuration.ConfigDescription(
                     "通用 UI 模板面板相对窗口锚点的纵向偏移（像素，负值向下）。改完热生效。"));
 

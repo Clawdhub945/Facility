@@ -66,8 +66,15 @@ internal static class UiTemplate
     /// 看起来就是"没显示"。这两个值就是把面板推进可视区所需的偏移。
     /// 调整方法见 `docs/UI模板.md`。
     /// </summary>
-    private static float _calibX = 240f;
-    private static float _calibY = -170f;
+    // ⚠ 基准必须是 (0,0)：实测**红块在 anchoredPosition=(0,0) 时能显示**
+    //   （之前把偏移改成 (240,-170) 后，红块和面板都被推出可视区 → 什么都看不到）。
+    //   所以这里从 0 起调，用 cfg 微调。
+    // ⚠ 精确定位值（由坐标测量算出，不再靠猜）：
+    //   Canvas: scaleFactor=0.9，UI 坐标 × 0.9 = 屏幕像素
+    //   nchor(0,0) 对应屏幕左下角 → 想让面板落在窗口中心附近，
+    //   UI 坐标约为 (339, -838)（= 屏幕 (305,754) ÷ 0.9，y 取负）
+    private static float _calibX = 339f;
+    private static float _calibY = -838f;
 
     /// <summary>标定值改为读 cfg（热生效），方便在游戏里试位置而不用改代码重编译</summary>
     private static void LoadCalibration()
@@ -176,7 +183,6 @@ internal static class UiTemplate
 
             // ⚠ **必须置顶**：新加的子物体默认排在最后（被别的 UI 盖住）。
             try { rrt.SetAsLastSibling(); } catch { }
-            if (Plugin.VerboseEntry?.Value == true) DumpChildren(window);
 
             // 面板底
             var bg = new GameObject("panel");
@@ -222,7 +228,7 @@ internal static class UiTemplate
 
             Plugin.LogV($"[FacilityUI] UI 模板已构建：窗口 {window.name}，" +
                         $"面板 {winW:0}×{winH:0}（建筑「{spec.Name}」）");
-            DumpPlacement(window, rrt);
+            DumpCoordSys(window);
             return true;
         }
         catch (Exception ex)
@@ -234,80 +240,101 @@ internal static class UiTemplate
     }
 
     /// <summary>
-    /// 诊断：打印模板的挂载位置 —— 父链、世界坐标、尺寸、是否在 Canvas 下、是否可见。
+    /// **坐标变换精确测量**（B 方案的攻坚工具）。
     ///
-    /// 为什么需要：模板日志显示"已构建"，但屏幕上**看不到**。
-    /// 要么被别的 UI 盖住（层级/排序），要么挂在了一个不参与渲染的父节点上，
-    /// 要么坐标在窗口可视区之外。这三件事只能靠这份数据区分，不能猜。
+    /// ## 为什么要这么测
+    /// 定位失败很多轮，根因是"我没有这个窗口的坐标变换真实数值，全靠推断"。
+    /// 这个诊断把「屏幕像素 ↔ UI 坐标」的映射关系直接量出来：
+    ///   1. **Canvas**：`scaleFactor` / `referenceResolution` / `pixelRect`
+    ///      → 屏幕像素到 UI 单位的换算系数
+    ///   2. **窗口根 RectTransform**：`position` / `pivot` / `rect` / `localScale` / 锚点
+    ///   3. **每个一级子控件**：同样的字段
+    ///   4. **反算**：用 Canvas 的换算系数把 UI 坐标换成屏幕像素，
+    ///      这样就能直接看出"某个 UI 位置会落在屏幕的哪里"，再也不用猜。
     /// </summary>
-    private static void DumpPlacement(GameObject window, RectTransform rt)
+    private static void DumpCoordSys(GameObject window)
     {
         try
         {
-            var sb = new StringBuilder("[FacilityUI] UI 模板挂载诊断:\n");
-            var cur = rt.transform;
-            int depth = 0;
-            while (cur != null && depth++ < 8)
-            {
-                var crt = cur.GetComponent<RectTransform>();
-                sb.Append("  ").Append(new string(' ', depth * 2)).Append(cur.name);
-                if (crt != null)
-                    sb.Append($" size={crt.rect.width:0}x{crt.rect.height:0}")
-                      .Append($" pos={crt.position.x:0},{crt.position.y:0}")
-                      .Append($" sibling={cur.GetSiblingIndex()}/{cur.parent?.childCount ?? 0}");
-                sb.Append(cur.gameObject.activeInHierarchy ? " [可见]" : " [不可见]").Append('\n');
-                if (cur.gameObject == window) break;
-                cur = cur.parent;
-            }
-            // 有没有 Canvas 祖先（没有就不会渲染）
-            bool hasCanvas = false;
-            try { hasCanvas = rt.GetComponentInParent<Canvas>() != null; } catch { }
-            sb.Append("  Canvas 祖先: ").Append(hasCanvas ? "有" : "【没有 → 不会渲染】").Append('\n');
-            // ⚠ 屏幕坐标最关键：窗口根 rect 常常是 550×0，光看它判断不出面板在不在可视区。
-            sb.Append($"  面板屏幕区: x={rt.position.x:0}..{rt.position.x + rt.rect.width:0}" +
-                      $" y={rt.position.y:0}..{rt.position.y - rt.rect.height:0}\n");
+            var sb = new StringBuilder("[FacilityUI] ===== 坐标变换测量 =====\n");
+            var canvas = window.GetComponentInParent<Canvas>();
+            if (canvas == null) { Plugin.LogV("[FacilityUI] 没有 Canvas 祖先"); return; }
+            var crt = canvas.GetComponent<RectTransform>();
+
+            sb.Append("Canvas: name=").Append(canvas.name)
+              .Append(" scaleFactor=").Append(canvas.scaleFactor.ToString("0.####"))
+              .Append(" renderMode=").Append(canvas.renderMode.ToString())
+              .Append('\n');
+            if (crt != null)
+                sb.Append("  canvas rect=").Append(crt.rect.width.ToString("0"))
+                  .Append('x').Append(crt.rect.height.ToString("0"))
+                  .Append(" pos=").Append(crt.position.x.ToString("0")).Append(',')
+                  .Append(crt.position.y.ToString("0"))
+                  .Append(" localScale=").Append(crt.localScale.x.ToString("0.####"))
+                  .Append('\n');
             try
             {
-                var canvas = rt.GetComponentInParent<Canvas>();
-                if (canvas != null)
-                {
-                    var crt = canvas.GetComponent<RectTransform>();
-                    if (crt != null)
-                        sb.Append($"  Canvas 屏幕区: x={crt.position.x:0}..{crt.position.x + crt.rect.width:0}" +
-                                  $" y={crt.position.y:0}..{crt.position.y - crt.rect.height:0}\n");
-                }
+                var c = canvas.GetComponent<CanvasScaler>();
+                if (c != null)
+                    sb.Append("  CanvasScaler: uiScaleMode=").Append(c.uiScaleMode.ToString())
+                      .Append(" refRes=").Append(c.referenceResolution.x.ToString("0"))
+                      .Append('x').Append(c.referenceResolution.y.ToString("0"))
+                      .Append(" match=").Append(c.matchWidthOrHeight.ToString("0.##"))
+                      .Append(" scaleFactor=").Append(c.scaleFactor.ToString("0.####"))
+                      .Append('\n');
             }
             catch { }
-            sb.Append($"  面板缩放={rt.localScale.x:0.##}");
-            Plugin.LogV(sb.ToString());
-        }
-        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 挂载诊断失败: {ex.Message}"); }
-    }
+            sb.Append("  Screen=").Append(Screen.width).Append('x').Append(Screen.height).Append('\n');
 
-    /// <summary>
-    /// 诊断：列出窗口一级子控件的**屏幕区域**，用来挑一个"真实可见"的锚点。
-    ///
-    /// 为什么要这样：窗口根节点的 `rect` 是 550×0，且它的位置在屏幕上可能是负的
-    /// （面板曾落在 `y=-1..-241`，完全在可视区之外）。
-    /// 所以模板必须参照**某个可见子控件**来定位，而不是窗口根。
-    /// </summary>
-    private static void DumpChildren(GameObject window)
-    {
-        try
-        {
-            var sb = new StringBuilder("[FacilityUI] 窗口子控件屏幕区:\n");
+            // 换算系数：屏幕像素 / UI 单位
+            float k = 1f;
+            try { k = canvas.scaleFactor > 0.001f ? canvas.scaleFactor : 1f; } catch { }
+            sb.Append($"  → 换算：UI 坐标 × {k:0.####} = 屏幕像素；屏幕像素 ÷ {k:0.####} = UI 坐标\n");
+
+            // 逐级打印到窗口根
+            sb.Append("--- 从窗口根到 Canvas 的链 ---\n");
+            var cur = window.transform;
+            int depth = 0;
+            while (cur != null && depth++ < 10)
+            {
+                var rt = cur.GetComponent<RectTransform>();
+                sb.Append("  ").Append(new string(' ', depth * 2)).Append(cur.name);
+                if (rt != null)
+                {
+                    sb.Append(" pos=").Append(rt.position.x.ToString("0")).Append(',')
+                      .Append(rt.position.y.ToString("0"))
+                      .Append(" pivot=").Append(rt.pivot.x.ToString("0.##")).Append(',')
+                      .Append(rt.pivot.y.ToString("0.##"))
+                      .Append(" rect=").Append(rt.rect.width.ToString("0")).Append('x')
+                      .Append(rt.rect.height.ToString("0"))
+                      .Append(" anchor=").Append(rt.anchorMin.x.ToString("0.##")).Append('-')
+                      .Append(rt.anchorMax.x.ToString("0.##"))
+                      .Append(" aPos=").Append(rt.anchoredPosition.x.ToString("0")).Append(',')
+                      .Append(rt.anchoredPosition.y.ToString("0"))
+                      .Append(" scale=").Append(rt.localScale.x.ToString("0.##"));
+                }
+                sb.Append(cur.gameObject.activeInHierarchy ? " [显示]" : " [隐藏]").Append('\n');
+                if (cur.gameObject == canvas.gameObject) break;
+                cur = cur.parent;
+            }
+
+            // 一级子控件的**屏幕像素**换算（关键：这告诉我"哪里可见"）
+            sb.Append("--- 一级子控件的屏幕像素位置（用 Canvas 换算）---\n");
             foreach (var t in window.GetComponentsInChildren<Transform>(true))
             {
                 if (t == null || t.parent != window.transform) continue;
                 var rt = t.GetComponent<RectTransform>();
                 if (rt == null) continue;
-                sb.Append($"  {t.name}: x={rt.position.x:0}..{rt.position.x + rt.rect.width:0}" +
-                          $" y={rt.position.y:0}..{rt.position.y - rt.rect.height:0}" +
-                          $" size={rt.rect.width:0}x{rt.rect.height:0}\n");
+                float sx = rt.position.x * k;
+                float sy = Screen.height - rt.position.y * k;   // UI y 向下 → 屏幕 y 向上
+                sb.Append($"  {t.name}: UIpos=({rt.position.x:0},{rt.position.y:0})")
+                  .Append($" → 屏幕像素≈({sx:0},{sy:0})")
+                  .Append($" size={rt.rect.width:0}x{rt.rect.height:0}")
+                  .Append('\n');
             }
             Plugin.LogV(sb.ToString());
         }
-        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 子控件诊断失败: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 坐标测量失败: {ex.Message}"); }
     }
 
     /// <summary>

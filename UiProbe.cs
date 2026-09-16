@@ -170,8 +170,8 @@ internal static class UiProbe
             srt.pivot = new Vector2(0.5f, 0.5f);
             srt.sizeDelta = new Vector2(260f, 150f);              // 与模板面板同尺寸
             srt.anchoredPosition = new Vector2(
-                Plugin.UiOffXEntry?.Value ?? 240f,
-                Plugin.UiOffYEntry?.Value ?? -170f);              // 与模板同偏移
+                Plugin.UiOffXEntry?.Value ?? 339f,
+                Plugin.UiOffYEntry?.Value ?? -838f);              // 与模板同偏移
             try { srt.SetAsLastSibling(); } catch { }
             var simg = solid.AddComponent<Image>();
             simg.color = new Color(1f, 0f, 0f, 0.85f);            // 醒目的红，一眼能看到
