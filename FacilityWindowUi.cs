@@ -149,7 +149,7 @@ internal static class FacilityWindowUi
         //   与占地尺寸无关（2×2 / 3×3 / N×N 同一套模板），多座建筑各自独立。
         if (spec.Ui != null)
         {
-            try { UiTemplate.Render(window, spec, _currentFacility); }
+            try { UiTemplate.Render(spec, _currentFacility); }
             catch (Exception ex) { Plugin.LogV($"[FacilityUI] UI 模板渲染失败: {ex.Message}"); }
         }
 

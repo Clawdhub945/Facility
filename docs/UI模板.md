@@ -1,67 +1,89 @@
-# 通用 UI 模板（任意尺寸建筑可复用）
+# 通用 UI 模板（v2）—— 独立 Canvas + Image 方案
 
 > 用户要求：「无论是 2×2、3×3，还是 N×N，UI 来一个全新模板，
 > 可以被后续多个建筑来自定义 UI 里的内容」
->
-> 本文记录**可行性验证结论 + 模板设计 + 使用方式 + 踩过的坑**。
 
 ---
 
-## 一、可行性验证（必须先做的那一步）
+## 一、最终结论（三次试错的收敛）
 
-**问题**：早前为了给下拉框做"金色描边"，在运行时**新增了一个 GameObject**
-并调 `SetAsFirstSibling`，结果**游戏进档后静默退出**
-（连 `BepInEx/ErrorLog.log` 都没写）。那次加的是带 `SpriteRenderer` 的物体。
+### ✅ 正确做法：**独立 `ScreenSpaceOverlay` Canvas + `UnityEngine.UI.Image`**
 
-**所以做模板前必须先验证：纯 uGUI 能不能在运行时构建。**
+```csharp
+// UiKit.EnsureRoot()
+var go = new GameObject("facility_uikit");
+go.layer = 5;                                   // UI 层
+var canvas = go.AddComponent<Canvas>();
+canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+canvas.overrideSorting = true;
+canvas.sortingOrder = 20000;                    // 压过游戏 UI
+go.AddComponent<GraphicRaycaster>();
 
-`UiProbe.cs` 做了这个最小实验（详细模式下开窗自动跑一次）：
+// 控件：Image（面板/色块/图标）+ TextMeshProUGUI（文字）
+// 尺寸/位置一律显式给出：anchorMin=anchorMax=(0.5,0.5) + sizeDelta + anchoredPosition
 ```
-UI 实验 ① 新建 GameObject 成功
-UI 实验 ② SetParent 成功
-UI 实验 ③ RectTransform 配置成功
-UI 实验 ④ Image 底板成功
-UI 实验 ⑤ TextMeshProUGUI 成功
+
+**实测结果**（自检日志 + 截图双重确认）：
 ```
-实测**游戏稳定**（构建后持续运行 24 秒以上无异常）。
-
-### 结论
-| 操作 | 可行性 |
-|---|---|
-| `new GameObject` + `SetParent` 到窗口 | ✅ 可行 |
-| `RectTransform` + 手工定位 | ✅ 可行 |
-| `Image`（纯色底板 / 进度条） | ✅ 可行 |
-| `TextMeshProUGUI` | ✅ 可行 |
-| `ScrollRect` + `Mask` | ✅ 可行 |
-| **带 `SpriteRenderer` 的物体** | ❌ **不要做**（曾导致游戏静默退出） |
+Canvas: rect=1440x900  renderMode=ScreenSpaceOverlay  order=20000  layer=5
+面板: size=(420.00, 220.00)  pos=(0.00, 0.00)      <- 尺寸终于正确
+图标 ui_603010 / ui_403010 / ui_105054: 全部"贴图有"
+色块像素统计: red=1709  green=1858  blue=1615       <- 三色块全部渲染
+```
+截图可见：深色面板 + 红绿蓝色块 + 中文文字 + 三个游戏图标与标签。
 
 ---
 
-## 二、游戏 UI 控件调研（决定模板能提供哪些"行"）
+## 二、试错过程（**不要再走这两条路**）
 
-### 有的控件
-| 类别 | 控件 |
-|---|---|
-| 文本 | `TextMeshProUGUI`、`IconText`、`MagicIconText` |
-| 图标+文字 | `IconTextNum`、`IconName`、`IconTextTextWithCheck` |
-| 物品显示 | `StuffIconNum`、`IconNum`、`IconNameNum` |
-| 数值调整 | `NumAdjust`（带 ▲▼） |
-| 勾选 | `MyCheckBox`、`MyCheckBoxGroup` |
-| 下拉 | `MyDropdown`、`TMP_Dropdown`、`StuffIconDropdown` |
-| 进度 | `MyProgressBar`、`MyProgressBarOnMap` |
-| 列表/网格 | `GridLayoutGroup`、`ScrollRect`、`Mask`、`LayoutElement` |
-| 按钮 | `Button` |
+### ❌ 路线 1：标准 uGUI 挂在游戏窗口内部
+* 窗口根 `window_gatherers_hut` 的 `rect` 是 **550×0**
+* 游戏自己的子控件（`title_area`/`content_area`/…）也全是 `550×0`
+* 原因：游戏 UI 是**自绘批渲染**（`batch_sprite_renderer_*`）画的，**uGUI 布局从不运行**
+* 后果：
+  * `rect` 永远是 0（UnityExplorer 里点 Apply 也无反应、重开数值恢复原值）
+  * `anchorMin=0/anchorMax=1` 的拉伸子物体 -> 高度 0
+  * 拿父 rect 推算尺寸 -> 也是 0
+* 现象：物体存在、坐标正确、`activeInHierarchy=true`，**但一个像素都不画**
 
-### **没有**的控件（影响模板布局方式）
-* `VerticalLayoutGroup` / `HorizontalLayoutGroup` —— **没有**
-* `ContentSizeFitter` —— **没有**
+### ❌ 路线 2：`SpriteRenderer` + `MySpriteRenderer`
+* **能画出来**（用户截图确认屏幕上出现了绿块）
+* 但**一打开建筑窗口就被盖住** —— 与游戏 UI 不在同一渲染体系
+* 附带发现：
+  * `MySpriteRenderer` **不是 MonoBehaviour**（`AddComponent` 返回 null、组件列表里永远不出现）
+    —— 它是普通 C# 包装对象，内部持有 `render_handler` 参与批渲染
+  * 挂上它之后 `sr.enabled` 会变成 `False`（它自己负责画，关掉被包装的渲染器避免重复绘制）
+  * `new GameObject()` 默认在 `Default`(0) 层，而游戏 UI 相机的 `cullingMask` 只渲染 `UI`(5) 层
+    -> **必须 `go.layer = 5`**，否则被直接剔除
+  * 画布父级 `ui_canvas.localScale = 0.01`：写世界 `z=-1` 会变成局部 `z=-100`
 
-→ **所以竖排列表必须自己算坐标**（`anchoredPosition` 自上而下累加）。
-模板就是这么做的。
+### ✅ 路线 3（采纳）：独立 Canvas + Image
+由 UnityExplorer 实测游戏自己的 UI 元素组件得出：
+```
+icon_num
+  Components: RectTransform, CanvasRenderer, IconNum, UnityEngine.UI.Image
+  Layer: UI
+```
+-> 游戏 UI 用的是 **`CanvasRenderer` + `Image`**，照抄即可。
 
 ---
 
-## 三、模板设计
+## 三、控件清单（`UiKit.cs`）
+
+| 方法 | 作用 |
+|---|---|
+| `EnsureRoot()` | 建独立 Overlay Canvas（`sortingOrder=20000`，layer=5） |
+| `AddPanel(parent, name, color, pos, size, anchor?)` | 面板/色块（`Image`） |
+| `AddText(parent, name, text, pos, size, fontSize, align, color, anchor?)` | 文字（`TextMeshProUGUI`，支持中文） |
+| `AddIcon(parent, name, spriteName, pos, size, anchor?)` | 图标（`Image` + 游戏贴图，如 `ui_603010`） |
+| `ResolveSprite(name)` | 从游戏贴图表取精灵（`SpriteManager.Get`） |
+
+**关键约定**：锚点默认 `(0.5,0.5)` = 屏幕中心；`sizeDelta`/`anchoredPosition` **必须显式给出**
+—— 不依赖任何父容器布局，这是"能用"的根本原因。
+
+---
+
+## 四、模板渲染器（`UiTemplate.cs`）
 
 ### 数据模型（`UiLayout.cs`）—— 建筑只描述"显示什么"
 ```csharp
@@ -77,153 +99,47 @@ Ui = new UiLayout {
 }
 ```
 
-### 已实现的行类型
-| 行类型 | 内容 | 数据来源 |
+### 行类型
+| 行 | 内容 | 默认高度 |
 |---|---|---|
-| `UiLabelRow` | 纯文字（可选次要色） | 静态文字 |
-| `UiItemRow` | **图标 + 数量**，自动换行 | 建筑仓库 / 配方需求 |
-| `UiStatusRow` | 状态文字，**绿=正常 / 红=异常** | `SmelterConsumer.BlockReason` |
-| `UiProgressRow` | **自绘进度条** + 百分比 | 燃料余量 / 今日是否开工 / 固定值 |
+| `UiLabelRow` | 纯文字（可次要色） | 22 |
+| `UiItemRow` | **图标 + 数量**（自动换行，放不下提示 +N） | 62 |
+| `UiStatusRow` | 状态文字（**绿=正常 / 红=异常**） | 22 |
+| `UiProgressRow` | **进度条** + 百分比 | 24 |
 
-### 渲染器（`UiTemplate.cs`）
-* 面板：深色底（`0.15,0.14,0.13,0.94`）+ 暖白文字 —— 照游戏自己的面板取色
-* 结构：`root（ScrollRect）→ viewport（Mask）→ content（自上而下排行）`
-* **按状态签名刷新**：每帧被调用，但只有"内容真的变了"才重排
-  （签名 = 各行的数据摘要；避免每帧重建 → 性能与闪烁）
-* 物品图标：`物品id → D.Ins.stuff_dic → stuff_img（如 ui_603010）→ SpriteManager.Get()`
-  *取不到就画灰色占位块，不空白*
-
-### 与占地尺寸无关
-布局全部用 `anchoredPosition` 手工计算，不依赖任何"建筑尺寸"参数 ——
-所以 2×2 / 3×3 / N×N 共用同一套模板（已在 2×2 与 3×3 两座高炉上同时启用验证）。
+### 渲染要点
+* 游戏**没有** `VerticalLayoutGroup` / `HorizontalLayoutGroup`（实测）-> 行位置**手工累加**
+* 面板高度**自适应内容**（`sizeDelta` 按行高总和算）
+* **按状态签名刷新**：每帧被调用，但内容没变不重建（性能 + 防闪烁）
+* 行宽固定 360px，**与建筑占地尺寸无关** -> 2×2 / 3×3 / N×N 共用一套模板
 
 ---
 
-## 五、[重要] 运行时 uGUI 的两个必须条件
+## 五、给新建筑配 UI
 
-这两条是反复失败后测出来的，缺一个就看不到面板：
+在 `BuildingSpec.cs` 里给那条规格加一个 `Ui` 即可，**不需要改任何 UI 代码**。
 
-### 1. 必须挂独立 Canvas + overrideSorting
-ar cv = root.AddComponent<Canvas>(); cv.overrideSorting = true; cv.sortingOrder = 30000;
-外加 GraphicRaycaster。
-
-**原因**：游戏的 UI 是**自绘批渲染**（atch_sprite_renderer_*）画的，
-我们的面板是标准 uGUI —— **两套渲染体系**。
-只改同级顺序（SetAsLastSibling）**压不住**游戏自绘 UI。
-实测：面板物体确实挂在窗口下（UnityExplorer 能看到 acility_ui_template），
-但屏幕上被游戏 UI 完全盖住；加独立 Canvas 后才显示。
-
-### 2. 不能用拉伸写法，必须给明确尺寸
-* 无效：nchorMin=0 / anchorMax=1 → 窗口根 
-ect 是 **550×0**，拉伸子物体高度为 0
-* 可行：**中心锚点 + 明确 sizeDelta**（nchorMin=anchorMax=(0.5,0.5)，sizeDelta=(260,150)）
-
-**原因**：窗口根 
-ect 是 550×0（它只是容器，实际尺寸由自绘系统决定），
-游戏自己的子控件也全是 550×0 —— **不存在窗口可视矩形**可当参照，
-这就是用锚点推算位置全部失败的根本原因。
-
-
-### ⭐⭐⭐ 4. 根因：窗口根的 rect 是 550x0（一切定位失败的源头）
-
-实测证据（`DumpCoordSys` + 标定日志）：
-```
-window_gatherers_hut  pos=(0,0)  rect=550x0      <- 高度 0！
-title_area / content_area / product_record / tips_root  size=550x0
-标定红块...尺寸 260x0                            <- 连红块也变成 0 高
-```
-
-**后果**：
-* 任何 `anchorMin=0 / anchorMax=1` 的**拉伸**子物体 -> **高度 0** -> 看不见
-* 任何拿"父 rect"推算尺寸的写法 -> 也是 0
-* 游戏自己的 UI 元素同样是 550x0（它们是**自绘批渲染**画的，不依赖 uGUI 布局）
-  -> **不存在"窗口可视矩形"可以当参照**，这解释了为什么"用锚点推算位置"全部失败
-
-**唯一正确的做法**：
-1. 面板根：**中心锚点 + 明确 sizeDelta**（`anchorMin=anchorMax=(0.5,0.5)`、`sizeDelta=(260,150)`）
-2. 子物体：可以安全地用拉伸填满**已给明确尺寸的父物体**
-3. 再加**独立 Canvas（overrideSorting）** 让 uGUI 画在游戏自绘 UI 之上
-
-**anchoredPosition 与 屏幕像素 的实测对应**（用于标定）：
-```
-(0,   0)   -> 屏幕 (0, 900)   = 左下角
-(400,-400) -> 屏幕 (4, 904)
--> 屏幕x 约 0.9 x X ；屏幕y 约 900 + 0.1 x Y（Y 系数很小，所以要大幅调整）
-```
-
-
-
-### ⭐⭐⭐ 5. 【最终结论】游戏窗口的 uGUI 布局**不运行** -> 标准 uGUI 量不出尺寸
-
-UnityExplorer 实测（用户提供）：
-```
-facility_ui_template
-  RectTransform.sizeDelta      = 260, 150      <- 设置是生效的
-  RectTransform.rect           = -130, 0, 260, 0   <- 但实际高度 0
-  RectTransform.offsetMin     = 0, -267
-  RectTransform.offsetMax     = 260, -267       <- 上下偏移相同 -> 高度算成 0
-```
-而且用户实测：点 `Inspect` 重新打开后**数值恢复原值**、点 `Apply` **没有任何反应**
--> **`rect` 不是实时值，而是布局系统在布局时写入的缓存**；
-   这个窗口的 uGUI **布局从不运行**（游戏用自绘批渲染画 UI），
-   所以 `rect` 永远是初始的 0。
-
-**含义**：
-* 用 `rect` 判断尺寸/位置**不可靠**（读到的永远是 0）
-* 用 `offsetMin/offsetMax`（拉伸）算尺寸**也不可靠**（父的 rect 是 0）
-* 标准 uGUI 在这个窗口里**没有可用的布局信息**
-
-**可行的两条路**：
-| 路 | 做法 | 代价 |
-|---|---|---|
-| **A. 用游戏自绘系统** | 用 `MySpriteRenderer`（游戏画 UI 用的就是它）创建面板/图标 | 需要逆向它的用法，工作量大但最"原生" |
-| **B. 复用现有控件** | 不改布局：改写窗口里已有的文本（`txt_*`）、往已有的物品格里填图标（`icon_num*`）、改已有进度/数值控件 | 零风险、立即可用；布局自由度低 |
-
-**推荐 B 打底 + A 逐步替换**：先用 B 让内容立刻可见，再逐步用 A 做自定义布局。
-
-### 6. 定位用 cfg 标定（热生效）
-
-
-`ini
-[UI模板]
-横偏移 = 0     # 正数 = 向右
-纵偏移 = 0     # 正数 = 向下
-`
-UiProbe 画的**红块与面板同参数** —— 看到红块在哪，面板就在哪。
+需要新"行类型"时：在 `UiLayout.cs` 加一个 `UiRow` 子类，
+在 `UiTemplate.RenderRow` 里加一个 `case`。
 
 ---
 
-## 六、坐标换算（已测得）
-`
-Canvas: ui_canvas  ScreenSpaceCamera  scaleFactor=0.9   rect=1600x1000
-  → UI 坐标 × 0.9 = 屏幕像素
-  → anchor(0,0)+(0,0) = 屏幕左下角
-换算：aPos ≈ (X / 0.9, -(Screen.height - Y) / 0.9)
-`
+## 六、诊断工具
+
+* `SpriteUiSelfTest` —— 进档后（详细模式开启时）自动跑一次，验证 UiKit 是否正常：
+  画面板 + 三色块 + 文字 + 三个游戏图标，日志打 `UI 自检` 前缀
+* `UiKit.EnsureRoot()` 的日志会打出 `rect` / `renderMode` / `sortingOrder` / `layer`
+* `SpriteUi.cs`（`SpriteRenderer` 路线）保留但**不是主路线**，
+  其层/深度/坐标换算的踩坑记录在注释里，供以后参考
 
 ---
 
-## 七、踩过的坑
+## 七、坐标换算备忘（若将来需要世界坐标方案）
 
-| 坑 | 现象 | 解法 |
-|---|---|---|
-| 窗口 `rect.height` 是布局前的初始值 | 日志出现「面板 526×**-96**」（负高度） | 取下限保护 + `Mathf.Abs` 兜底 |
-| 热键 F12 收不到 | `keybd_event` 发 F12 游戏无反应（F10/F8 正常） | 改成"详细模式下开窗自动跑一次"，不依赖热键 |
-| 诊断日志每帧刷 | 窗口开着时 `Apply` 每帧调用 | 按窗口实例 ID 去重（`_diagDone`） |
-| 面板不挡点击 | 窗口底层的东西会被点到 | 底板 `Image.raycastTarget = true` |
-| 数量文字看不清 | 叠在图标上 | 加 `Shadow` 描边 |
-
----
-
-## 八、给新建筑配 UI 的步骤
-
-```csharp
-// BuildingSpec.cs 里那条规格加一个 Ui
-Ui = new UiLayout {
-    Rows = { /* 按需组合上面四种行 */ }
-}
 ```
-**不需要改任何 UI 代码** —— 这是这套模板存在的意义。
-
-需要新的"行类型"时（例如数值调节、勾选、按钮），
-在 `UiLayout.cs` 加一个 `UiRow` 子类，在 `UiTemplate.RenderRow` 里加一个 `case`。
+Canvas: ui_canvas  renderMode=ScreenSpaceCamera  scaleFactor=0.9
+  canvas rect = 1600×1000   localScale = 0.01
+  -> 世界尺寸 = 16×10
+  -> anchor(0,0) + anchoredPosition(0,0) = 屏幕左下角
+把"屏幕像素点 (X, Y)"换算成 anchoredPosition：aPos ≈ (X/0.9, -(Screen.height-Y)/0.9)
+```

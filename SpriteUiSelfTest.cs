@@ -32,6 +32,9 @@ internal static class SpriteUiSelfTest
     internal static void Tick()
     {
         if (_done) return;
+        // 自检 demo 已完成使命（验证 UiKit 可用），默认不再显示面板，
+        // 免得挡住正式 UI。把 cfg 的「日志详细模式」打开即可重新跑一次。
+        if (Plugin.VerboseEntry?.Value != true) return;
 
         // 等主相机就绪（进档过程中相机可能还没建好）
         Camera? cam = null;
