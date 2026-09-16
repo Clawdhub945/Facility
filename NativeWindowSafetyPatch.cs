@@ -124,20 +124,82 @@ internal static class NativeWindowSafetyPatch
         try
         {
             if (__instance is not Component c || c == null) return true;
-            bool ours = FacilityWindowUi.IsOurWindowPublic(c.gameObject);
-            if (!ours) return true;                     // 原版窗口：完全放行
 
             string name = __originalMethod?.Name ?? "?";
-            bool conditional = !name.EndsWith("ShowWindowTip");   // ShowWindowTip 系无条件跳过
 
-            if (!conditional && !NeedsWorkshopButMissing(c)) return true;
+            // ① `ShowWindowTip` 系：判据用「**窗口预制体名**是否属于本 mod 建筑的窗口」。
+            //
+            // 反编译实证（`WindowGatherersHut.ShowWindowTip`）：
+            //   gatherers_hut = this->fields.gatherers_hut;
+            //   if (!gatherers_hut) sub_1803AB740();        // ← 空引用崩在这
+            // 即窗口必须绑着 `FacilityGatherersHut`。
+            //
+            // ⚠ 为什么不用「字段在不在」当判据：实测该方法被调用的**时机早于字段绑定**
+            //   （探针显示判据当时返回了"放行"，紧接着方法内部就抛了空引用）。
+            //   窗口名来自 build.json 的 `window_prefab`，稳定、不依赖时序。
+            if (name.EndsWith("ShowWindowTip"))
+            {
+                string winName = "";
+                try { winName = c.gameObject.name ?? ""; } catch { }
+                if (!IsOurWindowName(winName)) return true;          // 原版窗口：放行
 
-            Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{name}" +
-                        (conditional ? "（窗口缺 workshop 对象）" : "（该方法在本 mod 建筑上必崩）"));
-            return false;
+                Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{name}" +
+                            $"（窗口 {winName} 属于本 mod 建筑；该方法依赖未绑定的设施对象）");
+                return false;
+            }
+
+            // ② 其余方法：只对本 mod 窗口生效，且仅当缺 `workshop` 时跳过
+            //    （无脑跳过会让熔炉的配方下拉永远是空的 —— 踩过）
+            if (!FacilityWindowUi.IsOurWindowPublic(c.gameObject)) return true;
+            if (NeedsWorkshopButMissing(c))
+            {
+                Plugin.LogV($"[Facility] 护栏跳过 {c.GetType().Name}.{name}（窗口缺 workshop 对象）");
+                return false;
+            }
+            return true;
         }
         catch { }
         return true;
+    }
+
+    /// <summary>
+    /// 这个窗口名是不是本 mod 建筑用的窗口预制体
+    /// （取自 `BuildingSpec.WindowPrefab`，即 build.json 的 `window_prefab`）。
+    /// </summary>
+    private static bool IsOurWindowName(string windowName)
+    {
+        if (string.IsNullOrEmpty(windowName)) return false;
+        foreach (var b in Buildings.All)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(b.WindowPrefab)) continue;   // 占位，下面用带前缀比较
+            }
+            catch { }
+        }
+        // 窗口实例名通常是 `<prefab名>`（可能带 `(Clone)` 之类的后缀）
+        foreach (var b in Buildings.All)
+        {
+            string p = "";
+            try { p = b.WindowPrefab ?? ""; } catch { }
+            if (p.Length > 0 && windowName.StartsWith(p)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>读一个字段：存在且非 null 才返回 true（读不到字段也算 false）</summary>
+    private static bool HasBoundField(Component c, string fieldName)
+    {
+        try
+        {
+            var t = c.GetType();
+            var fi = t.GetField(fieldName);
+            if (fi != null) return fi.GetValue(c) != null;
+            var pi = t.GetProperty(fieldName);
+            if (pi != null) return pi.GetValue(c) != null;
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>
