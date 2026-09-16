@@ -40,6 +40,30 @@ internal static class SpriteUi
     /// <summary>我们创建的 UI 根物体名（便于识别/清理）</summary>
     internal const string RootName = "facility_sprite_ui";
 
+    /// <summary>
+    /// **UI 层**（实测：游戏自己的 UI 元素都在 UI 层，content_area 的 Layer = UI）。
+    ///
+    /// ⚠⚠ 这是看不见的**真正原因**：游戏 UI 相机的 cullingMask 只渲染 UI 层，
+    ///   而 `new GameObject()` 默认是 Default(0) 层 → **被相机直接剔除**，
+    ///   物体存在、坐标正确，但一个像素都不会画出来。
+    ///   （用户实测反馈：selftest_red 在 UnityExplorer 里能选中，但屏幕上没有。）
+    /// </summary>
+    internal const int UiLayer = 5;      // Unity 内置 "UI" 层的索引是 5
+
+    /// <summary>把物体及其所有子物体设为 UI 层（新物体默认在 Default 层，会被相机剔除）</summary>
+    internal static void SetUiLayer(GameObject go)
+    {
+        try
+        {
+            go.layer = UiLayer;
+            foreach (var t in go.GetComponentsInChildren<Transform>(true))
+            {
+                if (t != null) t.gameObject.layer = UiLayer;
+            }
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 设置 UI 层失败: {ex.Message}"); }
+    }
+
     private static GameObject? _root;
     private static GameObject? _owner;
 
@@ -64,21 +88,92 @@ internal static class SpriteUi
     /// </summary>
     internal static class Coords
     {
+        /// <summary>画布中心的世界坐标（= 屏幕中心，最可靠的参照点）</summary>
+        internal static Vector3 CanvasCenter(GameObject uiRoot)
+        {
+            var rt = FindCanvasRect(uiRoot);
+            if (rt != null) return new Vector3(rt.position.x, rt.position.y, 0f);
+            return Vector3.zero;
+        }
+
+        /// <summary>
+        /// 找到游戏 UI 画布的 `RectTransform`（多重兜底）。
+        ///
+        /// ⚠ 实测教训：`GetComponentInParent&lt;Canvas&gt;()` 在本 mod 场景下**返回 null**
+        /// （于是原本退化成 (0,0)），算出的世界坐标跑到屏幕外约 5 倍高度处 ——
+        /// 用户报告"没看到"，UnityExplorer 显示 `Position y = +51`。
+        /// 所以这里按 ①父链 ②自身 ③按名字找（`ui_canvas`/`ui`/`window_root`）
+        /// ④场景里任意活动 Canvas 的顺序兜底。
+        /// </summary>
+        internal static RectTransform? FindCanvasRect(GameObject uiRoot)
+        {
+            // ① 父链上的 Canvas
+            try
+            {
+                var c = uiRoot.GetComponentInParent<Canvas>();
+                if (c != null) { var r = c.GetComponent<RectTransform>(); if (r != null) return r; }
+            }
+            catch { }
+            // ② 自身
+            try
+            {
+                var c = uiRoot.GetComponent<Canvas>();
+                if (c != null) { var r = c.GetComponent<RectTransform>(); if (r != null) return r; }
+            }
+            catch { }
+            // ③ 按名字找（`ui_canvas` 是实测层级里的名字）
+            foreach (var nm in new[] { "ui_canvas", "ui", "window_root" })
+            {
+                try
+                {
+                    var go = GameObject.Find(nm);
+                    if (go == null) continue;
+                    var c = go.GetComponent<Canvas>();
+                    if (c != null) { var r = c.GetComponent<RectTransform>(); if (r != null) return r; }
+                }
+                catch { }
+            }
+            // ④ 场景里任意活动 Canvas
+            try
+            {
+                foreach (var c in UnityEngine.Object.FindObjectsOfType<Canvas>())
+                {
+                    if (c == null) continue;
+                    var r = c.GetComponent<RectTransform>();
+                    if (r != null && r.rect.width > 1f) return r;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>诊断：把画布读数打成一行（定位问题的第一手数据）</summary>
+        internal static string DescribeCanvas(GameObject uiRoot)
+        {
+            try
+            {
+                var rt = FindCanvasRect(uiRoot);
+                if (rt == null) return "画布 RectTransform 找不到（全部兜底都失败）";
+                var size = CanvasWorldSize(uiRoot);
+                return $"canvas={rt.name} rect={rt.rect.width:0}x{rt.rect.height:0}" +
+                       $" pos=({rt.position.x:0.###},{rt.position.y:0.###})" +
+                       $" pivot=({rt.pivot.x:0.##},{rt.pivot.y:0.##})" +
+                       $" scale={rt.localScale.x:0.####}" +
+                       $" 世界尺寸={size.x:0.##}x{size.y:0.##}";
+            }
+            catch (Exception ex) { return $"DescribeCanvas 失败: {ex.Message}"; }
+        }
+
         /// <summary>画布的世界尺寸（宽 × 高）。取不到时用 16×10 兜底。</summary>
         internal static Vector2 CanvasWorldSize(GameObject uiRoot)
         {
             try
             {
-                var canvas = uiRoot.GetComponentInParent<Canvas>();
-                if (canvas != null)
+                var crt = FindCanvasRect(uiRoot);
+                if (crt != null && crt.rect.width > 1f && crt.rect.height > 1f)
                 {
-                    var crt = canvas.GetComponent<RectTransform>();
-                    if (crt != null && crt.rect.width > 1f && crt.rect.height > 1f)
-                    {
-                        var s = canvas.transform.localScale;
-                        float k = Mathf.Abs(s.x) > 1e-6f ? s.x : 1f;
-                        return new Vector2(crt.rect.width * k, crt.rect.height * k);
-                    }
+                    float k = Mathf.Abs(crt.localScale.x) > 1e-6f ? crt.localScale.x : 1f;
+                    return new Vector2(crt.rect.width * k, crt.rect.height * k);
                 }
             }
             catch { }
@@ -90,18 +185,13 @@ internal static class SpriteUi
         {
             try
             {
-                var canvas = uiRoot.GetComponentInParent<Canvas>();
-                if (canvas != null)
-                {
-                    var crt = canvas.GetComponent<RectTransform>();
-                    if (crt != null)
-                    {
-                        var size = CanvasWorldSize(uiRoot);
-                        // pivot 通常为 0.5,0.5 → 左上角 = 中心 + (−w/2, +h/2)
-                        return new Vector3(crt.position.x - size.x * (1f - crt.pivot.x),
-                                           crt.position.y + size.y * (1f - crt.pivot.y), 0f);
-                    }
-                }
+                // ⚠ 实测教训：`GetComponentInParent<Canvas>()` 在本 mod 场景下会返回 null，
+                //   于是退化到 (0,0)，导致算出的世界坐标跑到屏幕外约 5 倍高度处
+                //   （用户报告"没看到"，UnityExplorer 显示 `Position y = +51`）。
+                //   所以这里统一走 CanvasCenter()（它有多重兜底），再由中心推左上角。
+                Vector3 center = CanvasCenter(uiRoot);
+                var size = CanvasWorldSize(uiRoot);
+                return new Vector3(center.x - size.x * 0.5f, center.y + size.y * 0.5f, 0f);
             }
             catch { }
             return Vector3.zero;
@@ -156,6 +246,7 @@ internal static class SpriteUi
             go.transform.SetParent(parent, false);
             go.transform.position = anchor.transform.position;   // 与锚点同位（世界坐标）
             go.transform.localScale = Vector3.one;
+            SetUiLayer(go);
             _root = go; _owner = anchor;
             Plugin.LogV($"[FacilityUI] 自绘 UI 根已建：{name}（父级 {parent.name}）");
             return go;
@@ -187,6 +278,7 @@ internal static class SpriteUi
             go.transform.SetParent(parent.transform, false);
             go.transform.position = worldPos;
             go.transform.localScale = new Vector3(scale, scale, 1f);
+            go.layer = UiLayer;
 
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = ResolveSprite(spriteName);
@@ -307,12 +399,23 @@ internal static class SpriteUi
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent.transform, false);
+            go.layer = UiLayer;                         // ⚠ 必须：否则被 UI 相机剔除（实测的"看不见"根因）
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = UnitSprite();                   // 1×1、ppu=1 → 1 单位 = 1 像素
             sr.color = color;
             try { sr.sortingOrder = sortingOrder; } catch { }
-            go.transform.position = worldPos;
+            // ⚠ 自检实测：`sr.enabled = False`（**不是我们关的**，可能是批渲染初始化时改的）
+            //   → 显式打开，否则永远不渲染。
+            try { sr.enabled = true; } catch { }
+
+            // ⚠ 深度用 **localPosition.z**，不要写世界 z ——
+            //   父级（`ui_canvas`）缩放是 **0.01**，写世界 `z=-1` 会变成局部 `z=-100`
+            //   （跑到相机后面/视锥外，实测踩过）。
+            go.transform.position = new Vector3(worldPos.x, worldPos.y, go.transform.position.z);
+            var lp = go.transform.localPosition;
+            go.transform.localPosition = new Vector3(lp.x, lp.y, -1f);
             go.transform.localScale = new Vector3(widthPx, heightPx, 1f);
+
             AttachMySpriteRenderer(go, sr, "", sortingOrder);
             return sr;
         }
@@ -358,6 +461,7 @@ internal static class SpriteUi
             go.transform.position = worldPos;
             go.transform.localScale = Vector3.one * size;
 
+            go.layer = UiLayer;
             var tmp = go.AddComponent<TextMeshPro>();
             tmp.text = text ?? "";
             tmp.fontSize = 3f;

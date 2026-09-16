@@ -187,6 +187,9 @@ internal static class UiProbe
                 back = $"({sp.x:0},{sp.y:0})";
             }
             var size = uiRoot != null ? SpriteUi.Coords.CanvasWorldSize(uiRoot) : Vector2.zero;
+            var center = uiRoot != null ? SpriteUi.Coords.CanvasCenter(uiRoot) : Vector3.zero;
+            Plugin.LogV($"[Facility] {SpriteUi.Coords.DescribeCanvas(uiRoot)}");
+            Plugin.LogV($"[Facility] 画布中心世界坐标=({center.x:0.###},{center.y:0.###})");
             Plugin.LogV($"[Facility] 自绘标定块：世界坐标=({worldPos.x:0.###},{worldPos.y:0.###})" +
                         $" → 回算屏幕像素={back}；画布世界尺寸={size.x:0.##}×{size.y:0.##}" +
                         $"；屏幕={Screen.width}×{Screen.height}；缩放={tf.localScale.x:0}×{tf.localScale.y:0}");

@@ -1,0 +1,43 @@
+【UI 系统打通】UiKit v2：独立 Canvas + Image 方案完全可用（含中文与游戏图标）
+
+## 决定性突破
+用户提供的两张 UnityExplorer 截图 + 一次绿块目击，把问题彻底定位：
+
+### 证据 1：`SpriteRenderer` 能画，但会被游戏 UI 盖住
+用户截图显示屏幕上出现巨大绿块（自检 B 组），
+但**一打开高炉窗口就消失** → 说明被游戏 UI 覆盖（两套渲染体系）。
+
+### 证据 2（关键）：游戏 UI 元素**不用 SpriteRenderer**
+```
+icon_num
+  Components: RectTransform, CanvasRenderer, IconNum, UnityEngine.UI.Image
+  Layer: UI
+```
+→ 游戏 UI 用的是 **`CanvasRenderer` + `UnityEngine.UI.Image`**。
+
+## 修法：`UiKit.cs`（v2，新主路线）
+* **独立 `ScreenSpaceOverlay` Canvas**，`overrideSorting + sortingOrder=20000`
+  —— **不挂在游戏窗口里**：窗口根 `rect` 是 550×0，挂进去后尺寸/位置永远算不出来
+  （这是之前所有失败的根因）
+* 控件用 `Image`（面板/色块/图标）+ `TextMeshProUGUI`（文字）
+* 尺寸/位置**显式给出**（`anchorMin=anchorMax=(0.5,0.5)` + `sizeDelta` + `anchoredPosition`），
+  不依赖任何父容器布局
+* 图标直接用游戏贴图表：`SpriteManager.Get("ui_603010")` 等
+* Layer 一律设为 `UI`(5)
+
+## 实测（自检日志 + 截图双重确认）
+```
+Canvas: rect=1440x900  renderMode=ScreenSpaceOverlay  order=20000  layer=5
+面板: size=(420.00, 220.00) pos=(0.00, 0.00)          ← 尺寸终于正确
+图标 ui_603010 / ui_403010 / ui_105054: 全部"贴图有"
+色块像素统计: red=1709  green=1858  blue=1615          ← 三色块全部渲染
+```
+截图可见：深色面板 + 红绿蓝色块 + 中文文字 + 三个游戏图标与标签 —— **完全正常**。
+
+## 保留的旧路线
+`SpriteUi.cs`（`SpriteRenderer` + `MySpriteRenderer`）保留但不再是主路线，
+其结论（层/深度/坐标换算踩坑）已写进注释，供以后参考。
+
+## 自检
+`SpriteUiSelfTest` 现在跑 v2 流程（进档自动执行、不依赖热键），
+日志前缀 `UI 自检`，可一眼确认系统是否正常。
