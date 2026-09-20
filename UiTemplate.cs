@@ -55,6 +55,9 @@ internal static class UiTemplate
     {
         try
         {
+            // 总开关：关掉后完全不创建（隔离测试用 —— 判断操作被挡是不是我们的 UI 造成的）
+            if (Plugin.UiEnabledEntry?.Value == false) { Destroy(); return; }
+
             if (spec?.Ui == null || facility == null) { Destroy(); return; }
             if (!facility.gameObject.activeInHierarchy) { Destroy(); return; }
 
@@ -79,6 +82,8 @@ internal static class UiTemplate
                 _panel.anchoredPosition = new Vector2(px, py);
                 _lastSig = "";       // 位置变了触发一次重排（日志）
             }
+
+            UiKit.SyncVisibility();
 
             string sig = Signature(spec, facility);
             if (sig == _lastSig) return;

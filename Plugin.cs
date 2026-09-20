@@ -96,6 +96,12 @@ public class Plugin : BasePlugin
     /// UI 模板的定位标定（像素）。窗口坐标系刁钻，用 cfg 便于**不改代码就能试位置**。
     /// 见 docs/UI模板.md 的标定流程。
     /// </summary>
+    /// <summary>UI 总开关：false 时完全不创建我们的 UI（隔离测试用）</summary>
+    internal static BepInEx.Configuration.ConfigEntry<bool>? UiEnabledEntry;
+
+    /// <summary>临时隐藏面板（保留对象，热生效）</summary>
+    internal static BepInEx.Configuration.ConfigEntry<bool>? UiShowEntry;
+
     /// <summary>UI 面板位置（相对屏幕中心的像素偏移；热生效）</summary>
     internal static BepInEx.Configuration.ConfigEntry<float>? UiPanelXEntry;
     internal static BepInEx.Configuration.ConfigEntry<float>? UiPanelYEntry;
@@ -144,6 +150,13 @@ public class Plugin : BasePlugin
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
 
             // 自定义外观缩放：改完**最多 1.5 秒热生效**（不用重启游戏）
+            UiEnabledEntry = Config.Bind("UI模板", "启用", true,
+                new BepInEx.Configuration.ConfigDescription(
+                    "总开关。关掉后完全不创建我们的 UI（用于隔离测试"));
+            UiShowEntry = Config.Bind("UI模板", "显示", true,
+                new BepInEx.Configuration.ConfigDescription(
+                    "临时隐藏面板（保留对象，热生效）。用于判断是不是我们的 UI 挡了操作。"));
+
             UiPanelXEntry = Config.Bind("UI模板", "面板横位置", 420f,
                 new BepInEx.Configuration.ConfigDescription(
                     "UI 面板中心相对屏幕中心的横向像素偏移（正=右）。改完热生效。"));

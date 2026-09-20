@@ -39,6 +39,21 @@ internal static class UiKit
     internal static GameObject? Root => _canvasGo;
 
     /// <summary>
+    /// 根据 cfg「显示」开关同步可见性（热生效）。
+    /// 用途：怀疑"我们的 UI 挡了操作"时，把它设为 false 即可**立刻验证**（不用重启）。
+    /// </summary>
+    internal static void SyncVisibility()
+    {
+        try
+        {
+            if (_canvasGo == null || !_canvasGo) return;
+            bool want = Plugin.UiShowEntry?.Value ?? true;
+            if (_canvasGo.activeSelf != want) _canvasGo.SetActive(want);
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// 建（或复用）我们自己的 **Screen Space Overlay Canvas**。
     ///
     /// 为什么不挂在游戏窗口里：窗口根的 `rect` 是 550×0，挂进去后

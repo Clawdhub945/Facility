@@ -60,6 +60,7 @@ public class FacilityComponent : MonoBehaviour
         //   目的：把"画布的真实坐标读数 + 红块实际位置"打进日志，
         //   这样即使 F10 开窗失效也能定位问题（实测 F10 在自动化环境里时好时坏）。
         try { SpriteUiSelfTest.Tick(); } catch { }
+        try { InputPassthroughCheck.Tick(); } catch { }
         PollTestHotkey();
         PollCustomSprite();
 
