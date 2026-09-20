@@ -137,9 +137,91 @@ internal static class UiKit
         _canvasGo = null; _canvas = null; _canvasRt = null;
     }
 
+    /// <summary>
+    /// 交互模式开关：true = 我们的 UI **接收点击**（这样才能有可点的关闭按钮）。
+    ///
+    /// ⚠ 权衡说明：纯展示时不需要接收点击（那时会拦截游戏窗口的输入），
+    ///   但要提供"关闭按钮"就必须能接收点击。
+    ///   所以只在**面板自身范围**内接收（面板 `<see cref="AddPanel"/>` 仍设
+    ///   `raycastTarget=false`，只有按钮是 true），
+    ///   面板之外的区域完全不拦 —— 游戏窗口照常可操作。
+    /// </summary>
+    internal static void SetInteractive(bool on)
+    {
+        try
+        {
+            if (_canvasGo == null || !_canvasGo) return;
+            var gr = _canvasGo.GetComponent<GraphicRaycaster>();
+            if (on && gr == null) _canvasGo.AddComponent<GraphicRaycaster>();
+            else if (!on && gr != null) UnityEngine.Object.Destroy(gr);
+
+            var cg = _canvasGo.GetComponent<CanvasGroup>();
+            if (cg != null) cg.blocksRaycasts = on;
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 设置交互模式失败: {ex.Message}"); }
+    }
+
     // ==================================================================
     // 控件
     // ==================================================================
+
+    /// <summary>
+    /// 建一个**可点击按钮**（带文字）。
+    /// 只有按钮自身 `raycastTarget=true`，其余控件一律穿透 ——
+    /// 这样"能点按钮"和"不挡游戏窗口"两者兼得。
+    /// </summary>
+    internal static Button? AddButton(RectTransform parent, string name, string label,
+                                      Vector2 anchoredPos, Vector2 size,
+                                      Action onClick,
+                                      Color? bgColor = null,
+                                      Vector2? anchor = null,
+                                      float fontSize = 14f)
+    {
+        try
+        {
+            var go = new GameObject(name);
+            go.layer = UiLayer;
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            var a = anchor ?? new Vector2(0.5f, 0.5f);
+            rt.anchorMin = a; rt.anchorMax = a;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = anchoredPos;
+            rt.sizeDelta = size;
+
+            var img = go.AddComponent<Image>();
+            img.color = bgColor ?? new Color(0.35f, 0.16f, 0.14f, 0.98f);
+            img.raycastTarget = true;                    // ★ 按钮要接收点击
+
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+            // IL2CPP 下 lambda 需要显式转成 UnityAction
+            btn.onClick.AddListener((UnityEngine.Events.UnityAction)(() =>
+            {
+                try { onClick?.Invoke(); } catch (Exception ex) { Plugin.LogError($"[FacilityUI] 按钮回调异常: {ex}"); }
+            }));
+
+            // 文字
+            var tgo = new GameObject("txt");
+            tgo.layer = UiLayer;
+            tgo.transform.SetParent(go.transform, false);
+            var trt = tgo.AddComponent<RectTransform>();
+            trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+            trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
+            var tmp = tgo.AddComponent<TextMeshProUGUI>();
+            tmp.text = label ?? "";
+            tmp.fontSize = fontSize;
+            tmp.color = new Color(0.96f, 0.92f, 0.86f, 1f);
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.raycastTarget = false;
+            return btn;
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogError($"[FacilityUI] 建按钮失败({name}): {ex}");
+            return null;
+        }
+    }
 
     /// <summary>
     /// 建一个**面板/色块**。

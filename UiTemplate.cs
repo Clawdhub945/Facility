@@ -31,6 +31,12 @@ internal static class UiTemplate
     private static RectTransform? _panel;
     private static BuildingSpec? _current;     // 正在渲染哪座建筑
     private static string _lastSig = "";
+
+    /// <summary>用户点了面板上的关闭按钮 → 本次不再显示（重新开窗会复位）</summary>
+    private static bool _userClosed;
+
+    /// <summary>关闭按钮是否已挂到当前面板上</summary>
+    private static bool _closeAdded;
     private static readonly List<GameObject> _rows = new();
 
     // ---- 布局常量（集中在此，便于调整）----
@@ -58,6 +64,9 @@ internal static class UiTemplate
             // 总开关：关掉后完全不创建（隔离测试用 —— 判断操作被挡是不是我们的 UI 造成的）
             if (Plugin.UiEnabledEntry?.Value == false) { Destroy(); return; }
 
+            // 用户点了关闭按钮 → 不再显示（直到重新开窗：窗口不活跃时会 Destroy 并复位）
+            if (_userClosed && facility != null && facility.gameObject.activeInHierarchy) return;
+
             if (spec?.Ui == null || facility == null) { Destroy(); return; }
             if (!facility.gameObject.activeInHierarchy) { Destroy(); return; }
 
@@ -71,6 +80,7 @@ internal static class UiTemplate
                                         PanelColor, Vector2.zero, new Vector2(Width, 200f));
                 if (_panel == null) return;
                 _canvas = canvas; _current = spec; _lastSig = "";
+                _closeAdded = false;
                 Plugin.LogV($"[FacilityUI] 模板：为建筑「{spec.Name}」建面板");
             }
 
@@ -84,6 +94,7 @@ internal static class UiTemplate
             }
 
             UiKit.SyncVisibility();
+            EnsureCloseButton();
 
             string sig = Signature(spec, facility);
             if (sig == _lastSig) return;
@@ -98,6 +109,9 @@ internal static class UiTemplate
     {
         DestroyPanel();
         _canvas = null; _current = null; _lastSig = "";
+        // 重新开窗会走这里 → 复位"用户关闭"标记，下次打开照常显示
+        _userClosed = false;
+        _closeAdded = false;
     }
 
     private static void DestroyPanel()
@@ -290,6 +304,45 @@ internal static class UiTemplate
                       new Vector2(x + w * 0.5f, -(topOffset + h * 0.5f)),
                       new Vector2(w, h), 13f, TextAlignmentOptions.Left, color,
                       new Vector2(0f, 1f));
+    }
+
+    // ==================================================================
+    // 关闭按钮
+    // ==================================================================
+
+    /// <summary>
+    /// 在面板右上角挂一个**关闭按钮**（✕）。
+    ///
+    /// 为什么需要：用户报告"打开后无法关闭/点击/移动"，而 F11 热键又被其他 mod 占用
+    /// → 干脆自己提供一个**可靠的关闭入口**。
+    ///
+    /// 交互设计（兼顾"能点按钮"与"不挡游戏窗口"）：
+    /// * Canvas 开启 `GraphicRaycaster` 是**必须的**（否则按钮点不动）
+    /// * 但**只有按钮** `raycastTarget = true`；面板与其余控件一律穿透
+    ///   → 面板范围外没有任何可点元素，游戏窗口照常可操作
+    /// </summary>
+    private static void EnsureCloseButton()
+    {
+        if (_closeAdded || _panel == null) return;
+        _closeAdded = true;
+        try
+        {
+            UiKit.SetInteractive(true);
+            var btn = UiKit.AddButton(_panel, "btn_close", "✕",
+                                      new Vector2(Width * 0.5f - 18f, -14f),
+                                      new Vector2(24f, 24f),
+                                      onClick: () =>
+                                      {
+                                          _userClosed = true;
+                                          if (_panel != null) _panel.gameObject.SetActive(false);
+                                          Plugin.LogV("[FacilityUI] 用户点了面板关闭按钮（重新开窗会再显示）");
+                                      },
+                                      bgColor: new Color(0.42f, 0.18f, 0.15f, 0.95f),
+                                      anchor: new Vector2(0f, 1f),
+                                      fontSize: 15f);
+            Plugin.LogV("[FacilityUI] 面板关闭按钮已就绪：" + (btn != null ? "成功" : "失败"));
+        }
+        catch (Exception ex) { Plugin.LogV($"[FacilityUI] 关闭按钮失败: {ex.Message}"); }
     }
 
     // ==================================================================
