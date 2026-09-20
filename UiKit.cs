@@ -38,16 +38,40 @@ internal static class UiKit
     /// <summary>UI 根（Canvas）</summary>
     internal static GameObject? Root => _canvasGo;
 
+    /// <summary>临时开关：true = 强制隐藏我们的 UI（不受 cfg 影响，F9 用）</summary>
+    private static bool _forceHidden;
+
     /// <summary>
-    /// 根据 cfg「显示」开关同步可见性（热生效）。
-    /// 用途：怀疑"我们的 UI 挡了操作"时，把它设为 false 即可**立刻验证**（不用重启）。
+    /// 切换我们的 UI 显示/隐藏，返回切换后的状态（true = 显示中）。
+    ///
+    /// 为什么需要热键：实测这份 cfg **不热重载**（改完文件游戏内毫无变化），
+    /// 所以"隐藏我们的 UI → 看游戏窗口是否恢复操作"这个隔离测试只能靠热键做。
+    /// </summary>
+    internal static bool ToggleVisible()
+    {
+        _forceHidden = !_forceHidden;
+        try
+        {
+            if (_canvasGo != null && _canvasGo) _canvasGo.SetActive(!_forceHidden);
+        }
+        catch { }
+        return !_forceHidden;
+    }
+
+    /// <summary>当前是否被强制隐藏（诊断用）</summary>
+    internal static bool ForceHidden => _forceHidden;
+
+    /// <summary>
+    /// 根据 cfg「显示」开关同步可见性。
+    /// ⚠ 实测 cfg **不热重载**，所以这个同步只在"进档/开窗"时生效；
+    ///   需要即时切换请用 <see cref="ToggleVisible"/>（F9 热键）。
     /// </summary>
     internal static void SyncVisibility()
     {
         try
         {
             if (_canvasGo == null || !_canvasGo) return;
-            bool want = Plugin.UiShowEntry?.Value ?? true;
+            bool want = (Plugin.UiShowEntry?.Value ?? true) && !_forceHidden;
             if (_canvasGo.activeSelf != want) _canvasGo.SetActive(want);
         }
         catch { }

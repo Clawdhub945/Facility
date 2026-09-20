@@ -83,6 +83,33 @@ public class Plugin : BasePlugin
 
     internal static ManualLogSource Logger = null!;
     internal static BepInEx.Configuration.ConfigFile? ModConfigFile;
+
+    /// <summary>cfg 文件上次写入时间（检测外部修改用）</summary>
+    private static DateTime _cfgMtime = DateTime.MinValue;
+
+    /// <summary>
+    /// 检测 cfg 被外部修改后**重新读取**。
+    ///
+    /// ⚠ 为什么需要：用户实测「改了 cfg 文件游戏内毫无变化」——
+    ///   BepInEx 的 `ConfigEntry.Value` 是内存值，**文件改动不会自动生效**，
+    ///   必须显式 `Reload()`。这里按文件修改时间做轻量轮询。
+    /// </summary>
+    internal static void PollConfigReload()
+    {
+        try
+        {
+            if (ModConfigFile == null) return;
+            string path = ModConfigFile.ConfigFilePath;
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) return;
+            var mt = System.IO.File.GetLastWriteTimeUtc(path);
+            if (_cfgMtime == DateTime.MinValue) { _cfgMtime = mt; return; }
+            if (mt == _cfgMtime) return;
+            _cfgMtime = mt;
+            ModConfigFile.Reload();
+            LogV($"[Facility] cfg 已热重载（改动时间 {mt:HH:mm:ss}）");
+        }
+        catch { }
+    }
     internal static BepInEx.Configuration.ConfigEntry<string>? ProductsEntry;
     internal static BepInEx.Configuration.ConfigEntry<string>? ExtraCandidatesEntry;
     internal static BepInEx.Configuration.ConfigEntry<int>? ExtraProductEntry;

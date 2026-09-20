@@ -28,6 +28,9 @@ public class FacilityComponent : MonoBehaviour
     /// <summary>F12 = UI 构建实验开关</summary>
     private bool _uiProbeLatch;
 
+    /// <summary>F11 = UI 总开关（隐藏/显示我们的面板）</summary>
+    private bool _uiToggleLatch;
+
     /// <summary>预制体清单只打一次（找游戏自带 UI 预制体用）</summary>
     private bool _dumpedPrefabs;
 
@@ -59,6 +62,8 @@ public class FacilityComponent : MonoBehaviour
         // ★ 自绘 UI 自检：进档后自动跑一次（不依赖开窗热键）。
         //   目的：把"画布的真实坐标读数 + 红块实际位置"打进日志，
         //   这样即使 F10 开窗失效也能定位问题（实测 F10 在自动化环境里时好时坏）。
+        // cfg 热重载（BepInEx 不会自动重读文件）
+        try { Plugin.PollConfigReload(); } catch { }
         try { SpriteUiSelfTest.Tick(); } catch { }
         try { InputPassthroughCheck.Tick(); } catch { }
         PollTestHotkey();
@@ -146,6 +151,17 @@ public class FacilityComponent : MonoBehaviour
 
             // F10 = 打开建筑窗口（无人值守测试用，OS 级鼠标点击标定太脆）。
             // **Shift+F10** = 打开「熔炉对照实验」(105052)，用来和 3×3 高炉做对照。
+            // ★ F11 = **UI 总开关**（隐藏/显示我们的面板）。
+            //   用途：隔离测试 —— 隐藏我们的 UI 后看游戏窗口能否正常关闭/点击/拖动。
+            //   ⚠ 不用 F9（已被历史诊断占用）、不用 F12（游戏收不到）。
+            bool down11 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F11);
+            if (down11 && !_uiToggleLatch)
+            {
+                bool now = UiKit.ToggleVisible();
+                Plugin.LogV($"[Facility] F11：我们的 UI 已{(now ? "显示" : "隐藏")}");
+            }
+            _uiToggleLatch = down11;
+
             // F12 = UI 构建实验（切换显示自建小组件）。
             // 只在 cfg 详细模式开启时生效 —— 这是「运行时构建 uGUI 会不会崩游戏」的验证开关。
             bool down12 = UnityEngine.Input.GetKey(UnityEngine.KeyCode.F12);
