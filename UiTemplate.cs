@@ -37,6 +37,13 @@ internal static class UiTemplate
 
     /// <summary>关闭按钮是否已挂到当前面板上</summary>
     private static bool _closeAdded;
+
+    /// <summary>
+    /// 上一次 `Render` 时窗口是否活跃 —— 用于检测"重新开窗"并复位 `_userClosed`。
+    /// （窗口关闭时 `Apply` 不被调用，所以"不活跃 → 活跃"就代表重新打开了）
+    /// </summary>
+    private static bool _wasActive;
+
     private static readonly List<GameObject> _rows = new();
 
     // ---- 布局常量（集中在此，便于调整）----
@@ -57,18 +64,31 @@ internal static class UiTemplate
     private static readonly Color BarFgColor = new Color(0.85f, 0.68f, 0.32f, 1f);
 
     /// <summary>渲染/刷新模板。每帧调用即可（内部按状态签名去重）。</summary>
-    internal static void Render(BuildingSpec? spec, Facility? facility)
+    internal static void Render(GameObject? window, BuildingSpec? spec, Facility? facility)
     {
         try
         {
             // 总开关：关掉后完全不创建（隔离测试用 —— 判断操作被挡是不是我们的 UI 造成的）
             if (Plugin.UiEnabledEntry?.Value == false) { Destroy(); return; }
 
-            // 用户点了关闭按钮 → 不再显示（直到重新开窗：窗口不活跃时会 Destroy 并复位）
-            if (_userClosed && facility != null && facility.gameObject.activeInHierarchy) return;
-
             if (spec?.Ui == null || facility == null) { Destroy(); return; }
-            if (!facility.gameObject.activeInHierarchy) { Destroy(); return; }
+
+            // ⚠⚠ "用户点了关闭按钮"的复位必须靠**检测窗口重新打开**。
+            //
+            // 踩过（严重 bug）：原来判断 `facility.gameObject.activeInHierarchy` ——
+            // 窗口关闭时**设施对象仍然活跃**（它在地图上），所以检测不到"重新开窗"，
+            // `_userClosed` 永远不复位 → **面板从此再也不显示**（用户报告「没有出现UI！！」）。
+            //
+            // 也不能靠"窗口实例变化"：实测游戏**复用同一个窗口对象**（`window` 引用不变）。
+            // 也不能在 `Destroy()` 里复位：窗口关闭期间它被**每帧**调用，复位等于没标记。
+            //
+            // 可靠做法：记住"上一次 Render 时窗口是否活跃"。
+            // 窗口关闭时 `Apply` 不再被调用，所以下次调用时若从"不活跃"变"活跃"，
+            // 就是一次**重新打开** → 复位标记。
+            bool nowActive = SafeActive(window);
+            if (nowActive && !_wasActive) _userClosed = false;
+            _wasActive = nowActive;
+            if (_userClosed) return;
 
             var canvas = UiKit.EnsureRoot();
             if (canvas == null) return;
@@ -109,9 +129,10 @@ internal static class UiTemplate
     {
         DestroyPanel();
         _canvas = null; _current = null; _lastSig = "";
-        // 重新开窗会走这里 → 复位"用户关闭"标记，下次打开照常显示
-        _userClosed = false;
         _closeAdded = false;
+        // ⚠ **不要**在这里复位 `_userClosed` ——
+        //   窗口关闭期间本方法会被**每帧**调用，复位会让"用户关闭"标记立刻失效。
+        //   复位只发生在"面板挂到了另一个窗口实例"时（见 Render 里的 `_panelOnWindow` 判断）。
     }
 
     private static void DestroyPanel()
@@ -386,6 +407,13 @@ internal static class UiTemplate
     private static int SafeGuid(Facility f)
     {
         try { return f.guid; } catch { return 0; }
+    }
+
+    /// <summary>安全读 `activeInHierarchy`（对象可能已销毁）</summary>
+    private static bool SafeActive(GameObject? go)
+    {
+        try { return go != null && go && go.activeInHierarchy; }
+        catch { return false; }
     }
 
     /// <summary>状态签名：任何影响显示的数据变化都要体现在这里（避免每帧重建）</summary>
