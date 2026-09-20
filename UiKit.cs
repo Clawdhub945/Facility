@@ -62,12 +62,23 @@ internal static class UiKit
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             _canvas.overrideSorting = true;             // 独立排序，压过游戏 UI
             _canvas.sortingOrder = sortingOrder;
-            go.AddComponent<GraphicRaycaster>();
+            // ⚠⚠ **不要** GraphicRaycaster：我们的 UI 是纯展示，**必须点击穿透**。
+            //   踩过：加了 GraphicRaycaster + 面板 raycastTarget=true 后，
+            //   面板挡住了游戏自己的窗口 → 关不掉、点不动、拖不动（用户实测反馈）。
 
             // Overlay 模式下 Canvas 自己会撑满屏幕，不需要 CanvasScaler
             var scaler = go.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
             scaler.scaleFactor = 1f;
+
+            // 双保险：整个 Canvas 设为不拦截射线
+            try
+            {
+                var cg = go.AddComponent<CanvasGroup>();
+                cg.blocksRaycasts = false;
+                cg.interactable = false;
+            }
+            catch { }
 
             _canvasRt = go.GetComponent<RectTransform>();
             _canvasGo = go;
@@ -114,6 +125,7 @@ internal static class UiKit
 
             var img = go.AddComponent<Image>();
             img.color = color;
+            // ⚠ **必须 false**：否则挡住游戏窗口的点击（关不掉/点不动/拖不动 —— 踩过）
             img.raycastTarget = false;
             return rt;
         }

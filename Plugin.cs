@@ -96,6 +96,10 @@ public class Plugin : BasePlugin
     /// UI 模板的定位标定（像素）。窗口坐标系刁钻，用 cfg 便于**不改代码就能试位置**。
     /// 见 docs/UI模板.md 的标定流程。
     /// </summary>
+    /// <summary>UI 面板位置（相对屏幕中心的像素偏移；热生效）</summary>
+    internal static BepInEx.Configuration.ConfigEntry<float>? UiPanelXEntry;
+    internal static BepInEx.Configuration.ConfigEntry<float>? UiPanelYEntry;
+
     internal static BepInEx.Configuration.ConfigEntry<float>? UiOffXEntry;
     internal static BepInEx.Configuration.ConfigEntry<float>? UiOffYEntry;
     private HarmonyLib.Harmony? _harmony;
@@ -140,6 +144,13 @@ public class Plugin : BasePlugin
                     new BepInEx.Configuration.AcceptableValueRange<int>(1, 999)));
 
             // 自定义外观缩放：改完**最多 1.5 秒热生效**（不用重启游戏）
+            UiPanelXEntry = Config.Bind("UI模板", "面板横位置", 420f,
+                new BepInEx.Configuration.ConfigDescription(
+                    "UI 面板中心相对屏幕中心的横向像素偏移（正=右）。改完热生效。"));
+            UiPanelYEntry = Config.Bind("UI模板", "面板纵位置", 0f,
+                new BepInEx.Configuration.ConfigDescription(
+                    "UI 面板中心相对屏幕中心的纵向像素偏移（正=下）。改完热生效。"));
+
             UiOffXEntry = Config.Bind("UI模板", "横偏移", 0f,
                 new BepInEx.Configuration.ConfigDescription(
                     "通用 UI 模板面板相对窗口锚点的水平偏移（像素）。改完热生效。"));

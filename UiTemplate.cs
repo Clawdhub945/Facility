@@ -71,6 +71,15 @@ internal static class UiTemplate
                 Plugin.LogV($"[FacilityUI] 模板：为建筑「{spec.Name}」建面板");
             }
 
+            // 面板位置（cfg 可调，热生效）—— 避免和游戏窗口重叠
+            float px = Plugin.UiPanelXEntry?.Value ?? 420f;
+            float py = Plugin.UiPanelYEntry?.Value ?? 0f;
+            if (_panel.anchoredPosition != new Vector2(px, py))
+            {
+                _panel.anchoredPosition = new Vector2(px, py);
+                _lastSig = "";       // 位置变了触发一次重排（日志）
+            }
+
             string sig = Signature(spec, facility);
             if (sig == _lastSig) return;
             _lastSig = sig;

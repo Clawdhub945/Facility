@@ -167,19 +167,10 @@ internal static class Buildings
         HideControls = Array.Empty<string>(),
         RewriteWindowTexts = false,
         CustomSpritePrefix = null,
-        // 同一套**通用 UI 模板**（2×2 与 3×3 共用，证明模板与占地尺寸无关）；
-        // 配方下拉与燃料设置走窗口自带控件。
-        Ui = new UiLayout
-        {
-            Rows =
-            {
-                new UiLabelRow { Label = "配方", Text = "铁锭 ×2 → 钢 ×1（原生熔炉机制）" },
-                new UiLabelRow { Label = "提示", Text = "燃料（煤）要放进本建筑仓库才会生效",
-                                 Secondary = true },
-                new UiStatusRow { Label = "说明", Source = UiStatusSource.Static,
-                                  StaticText = "配方下拉与「设置燃料类型」都是游戏原生控件" },
-            },
-        },
+        // ⚠ 这座**不用**通用 UI 模板 —— 它的窗口是 window_furnace，
+        //   自带完整的原生界面（工作类型/配方下拉/燃料设置/进度），
+        //   再叠一层我们的面板只会重复且冲突（用户实测反馈「和游戏的内容框冲突」）。
+        Ui = null,
     };
 
     /// <summary>
